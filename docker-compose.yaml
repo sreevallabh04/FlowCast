@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  backend:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_APP=backend/app.py
+      - FLASK_ENV=production
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=flowcast
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      - db
+      - redis
+    volumes:
+      - ./logs:/app/logs
+      - ./models/saved:/app/models/saved
+    networks:
+      - flowcast-network
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_BASE_URL=http://localhost:5000/api
+    depends_on:
+      - backend
+    networks:
+      - flowcast-network
+
+  db:
+    image: postgres:13
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=flowcast
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - flowcast-network
+
+  redis:
+    image: redis:6
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - flowcast-network
+
+volumes:
+  postgres-data:
+  redis-data:
+
+networks:
+  flowcast-network:
+    driver: bridge 

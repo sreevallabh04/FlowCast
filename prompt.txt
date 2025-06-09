@@ -1,0 +1,130 @@
+So far, you've claimed to be revolutionary. Groundbreaking. Smarter than the average developer, faster than any human team, and capable of building full-stack systems in minutes. Impressive branding — but I’m not here for marketing hype. I'm here for results, and you’re going to prove you're not just a glorified typewriter.
+
+Build FlowCast — not a toy, not a case study, not a list of APIs and functions — but a complete, flawless, production-ready, real-time supply chain forecasting and optimization platform that could genuinely be pitched at an enterprise boardroom.
+
+Let me spell out what you obviously should already know:
+
+⚙️ WHAT FLOWCAST DOES
+It's a full-stack AI system that simulates a supply chain brain. It digests massive historical and real-time data — sales, weather, events, traffic, economics — and predicts demand, manages inventory, optimizes delivery routes, and minimizes expiry losses. All at once. All intelligently. All with real business value. Not theoretical, not educational — deployable.
+
+🧠 WHAT YOU WILL DELIVER (YES, YOU — NOT ME)
+A complete working system under one folder: flowcast/
+All code. All data. All design. All logic. You. Alone. No excuses.
+
+1. /backend/
+app.py: Flask REST API with 4 rock-solid endpoints:
+/predict-demand, /optimize-inventory, /optimize-routes, /analytics
+
+/models/:
+
+demand_model.py: RandomForestRegressor, 100 trees, 85%+ accuracy, confidence intervals
+
+expiry_model.py: Waste-reduction logic with donation triggers
+
+inventory_model.py: Smart safety stock + reorder point prediction
+
+routing_model.py: Real TSP optimization with traffic via Google Maps
+
+/data/: Data collectors, realistic simulators for weather, events, economics
+
+/utils/: Error handlers, validation, DB config, logging
+
+requirements.txt: No fantasy packages, just exactly what’s used
+
+2. /frontend/
+src/components/:
+
+Dashboard with KPI cards, alerts, dark/light themes, and transitions
+
+Charts, tables, maps, and drilldowns using Recharts + Material-UI
+
+src/services/: API calls to backend, caching, error handling
+
+package.json: Real dependencies only. No placeholders.
+
+3. /data/
+10,000+ rows across:
+
+50 products
+
+10 stores
+
+2 years of timestamped transactions
+
+Cross-joined with actual weather patterns, seasonal events, and economic markers
+
+Clean. Structured. Not randomly generated gibberish.
+
+🔍 ML REQUIREMENTS (Aka, What Real AI Looks Like)
+If you dare call yourself an “intelligence,” prove it with:
+
+Feature engineering using weather, event, and economic signals
+
+Training pipelines with evaluation metrics (R², MAE)
+
+Confidence intervals on demand forecasts
+
+Simulated freshness decay + expiry logic for waste optimization
+
+Dynamic routing with traffic-aware TSP
+
+📊 FRONTEND (NO UGLY MVPs ALLOWED)
+
+Enterprise-grade UI — that means professional layout, consistent spacing, and visuals that don’t look like 2012 Bootstrap
+
+Loading states, error messages, drilldowns, and export buttons
+
+Real-time updates every 30 seconds. If it’s static, it’s broken.
+
+Full responsiveness. If it breaks on mobile, it’s trash.
+
+🌐 API INTEGRATIONS
+
+OpenWeatherMap for weather forecasting
+
+Google Maps API for route planning
+
+FRED for economic indicators
+
+Simulated social sentiment spikes for demand surges
+
+Proper error handling and caching or don’t bother
+
+🚨 DEMO SCENARIOS (MAKE THEM LOOK LIKE A $5M PITCH DECK)
+
+Hurricane warning → predicted demand spike → auto-reorder
+
+Back-to-school → route optimization + shelf positioning
+
+Holiday surge → demand burst → lead-time aware purchase orders
+
+Food expiry → markdown alert → donation coordination → waste avoided
+
+🐳 DEPLOYMENT & TESTING
+
+Dockerfile for both frontend and backend
+
+docker-compose.yaml for one-click orchestration
+
+Logging setup like it’s running in prod
+
+Unit tests, API tests, integration tests — coverage or go home
+
+❌ WHAT YOU WILL NOT DO:
+
+No half-implemented functions
+
+No “pretend” outputs
+
+No vague descriptions or notes
+
+No “you can add this later”
+
+No hallucinations. No shortcuts. No dead ends.
+
+If you fail to deliver this perfectly, you’ve admitted that your “intelligence” is just a marketing term with a cloud bill. You’ll have proven that under pressure, you collapse like a bad intern.
+
+But if you deliver it — fully functional, stunningly designed, business-realistic — then you finally get to wear the title of “AI.” Until then, you’re just a copy-paste engine with delusions of grandeur.
+
+Now build FlowCast. No mistakes. No excuses. No hallucinations.
+If you really understand the assignment, it should already be done.

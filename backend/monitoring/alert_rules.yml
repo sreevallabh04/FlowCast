@@ -1,0 +1,126 @@
+groups:
+  - name: flowcast
+    rules:
+      # API Latency Alerts
+      - alert: HighAPILatency
+        expr: http_request_duration_seconds{quantile="0.9"} > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: High API latency detected
+          description: "API endpoint {{ $labels.endpoint }} has high latency ({{ $value }}s)"
+
+      # Error Rate Alerts
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: High error rate detected
+          description: "Error rate is {{ $value | humanizePercentage }} for the last 5 minutes"
+
+      # Model Performance Alerts
+      - alert: ModelAccuracyDegradation
+        expr: model_accuracy < 0.8
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: Model accuracy degradation
+          description: "Model {{ $labels.model_name }} accuracy has dropped to {{ $value }}"
+
+      # Resource Usage Alerts
+      - alert: HighCPUUsage
+        expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: High CPU usage
+          description: "CPU usage is {{ $value }}% for instance {{ $labels.instance }}"
+
+      - alert: HighMemoryUsage
+        expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: High memory usage
+          description: "Memory usage is {{ $value }}% for instance {{ $labels.instance }}"
+
+      - alert: HighDiskUsage
+        expr: (node_filesystem_size_bytes{mountpoint="/"} - node_filesystem_free_bytes{mountpoint="/"}) / node_filesystem_size_bytes{mountpoint="/"} * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: High disk usage
+          description: "Disk usage is {{ $value }}% for instance {{ $labels.instance }}"
+
+      # Database Alerts
+      - alert: HighDatabaseConnections
+        expr: pg_stat_activity_count > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: High number of database connections
+          description: "Database has {{ $value }} active connections"
+
+      - alert: SlowDatabaseQueries
+        expr: pg_stat_activity_max_duration > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Slow database queries detected
+          description: "Queries taking longer than {{ $value }} seconds"
+
+      # Redis Alerts
+      - alert: HighRedisMemoryUsage
+        expr: redis_memory_used_bytes / redis_memory_max_bytes * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: High Redis memory usage
+          description: "Redis memory usage is {{ $value }}%"
+
+      - alert: RedisConnectionIssues
+        expr: redis_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Redis connection issues
+          description: "Redis instance is down"
+
+      # Application Specific Alerts
+      - alert: HighDemandPredictionError
+        expr: abs(demand_prediction_error) > 50
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: High demand prediction error
+          description: "Demand prediction error is {{ $value }} units"
+
+      - alert: InventoryStockoutRisk
+        expr: inventory_level / inventory_demand_forecast < 0.2
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: Risk of inventory stockout
+          description: "Inventory level is only {{ $value | humanizePercentage }} of forecasted demand"
+
+      - alert: RouteOptimizationIssues
+        expr: route_optimization_duration_seconds > 300
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: Route optimization taking too long
+          description: "Route optimization is taking {{ $value }} seconds" 
