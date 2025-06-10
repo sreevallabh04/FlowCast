@@ -1,24 +1,25 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import {
   Box,
+  Grid,
   Card,
   CardContent,
   Typography,
-  Grid,
-  TextField,
-  Button,
   CircularProgress,
-  Alert,
-  MenuItem
+  Alert
 } from '@mui/material';
-import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import {
+  Inventory as InventoryIcon,
+  LocalShipping as ShippingIcon,
+  Warning as WarningIcon,
+  TrendingUp as TrendingUpIcon
+} from '@mui/icons-material';
 import { useDispatch, useSelector } from 'react-redux';
 import {
   fetchAnalytics,
   fetchInventoryAnalytics,
   fetchRouteAnalytics,
-  fetchPerformanceMetrics,
-  setTimeRange
+  fetchPerformanceMetrics
 } from '../../redux/slices/analyticsSlice';
 import {
   LineChart,
@@ -31,21 +32,12 @@ import {
   ResponsiveContainer,
   PieChart,
   Pie,
-  Cell,
-  BarChart,
-  Bar
+  Cell
 } from 'recharts';
 
-const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8'];
+const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042'];
 
-const timeRanges = [
-  { label: 'Last 7 Days', value: 7 },
-  { label: 'Last 30 Days', value: 30 },
-  { label: 'Last 90 Days', value: 90 },
-  { label: 'Last Year', value: 365 }
-];
-
-const Analytics = () => {
+const Dashboard = () => {
   const dispatch = useDispatch();
   const {
     overview,
@@ -53,23 +45,20 @@ const Analytics = () => {
     routes,
     performance,
     loading,
-    error,
-    timeRange
+    error
   } = useSelector(state => state.analytics);
 
-  const [selectedTimeRange, setSelectedTimeRange] = useState(30);
-
   useEffect(() => {
-    const newTimeRange = {
-      start: new Date(new Date().setDate(new Date().getDate() - selectedTimeRange)),
+    const timeRange = {
+      start: new Date(new Date().setDate(new Date().getDate() - 30)),
       end: new Date()
     };
-    dispatch(setTimeRange(newTimeRange));
-    dispatch(fetchAnalytics(newTimeRange));
-    dispatch(fetchInventoryAnalytics(newTimeRange));
-    dispatch(fetchRouteAnalytics(newTimeRange));
-    dispatch(fetchPerformanceMetrics(newTimeRange));
-  }, [dispatch, selectedTimeRange]);
+
+    dispatch(fetchAnalytics(timeRange));
+    dispatch(fetchInventoryAnalytics(timeRange));
+    dispatch(fetchRouteAnalytics(timeRange));
+    dispatch(fetchPerformanceMetrics(timeRange));
+  }, [dispatch]);
 
   if (loading) {
     return (
@@ -89,53 +78,15 @@ const Analytics = () => {
 
   return (
     <Box p={3}>
-      {/* Time Range Selection */}
-      <Card sx={{ mb: 3 }}>
-        <CardContent>
-          <Grid container spacing={2} alignItems="center">
-            <Grid item xs={12} md={4}>
-              <TextField
-                fullWidth
-                select
-                label="Time Range"
-                value={selectedTimeRange}
-                onChange={(e) => setSelectedTimeRange(e.target.value)}
-              >
-                {timeRanges.map(range => (
-                  <MenuItem key={range.value} value={range.value}>
-                    {range.label}
-                  </MenuItem>
-                ))}
-              </TextField>
-            </Grid>
-            <Grid item xs={12} md={4}>
-              <DatePicker
-                label="Start Date"
-                value={timeRange.start}
-                onChange={(date) => dispatch(setTimeRange({ ...timeRange, start: date }))}
-                renderInput={(params) => <TextField {...params} fullWidth />}
-              />
-            </Grid>
-            <Grid item xs={12} md={4}>
-              <DatePicker
-                label="End Date"
-                value={timeRange.end}
-                onChange={(date) => dispatch(setTimeRange({ ...timeRange, end: date }))}
-                renderInput={(params) => <TextField {...params} fullWidth />}
-              />
-            </Grid>
-          </Grid>
-        </CardContent>
-      </Card>
-
       {/* Overview Cards */}
       <Grid container spacing={3} mb={4}>
         <Grid item xs={12} sm={6} md={3}>
           <Card>
             <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Total Items
-              </Typography>
+              <Box display="flex" alignItems="center" mb={2}>
+                <InventoryIcon color="primary" sx={{ mr: 1 }} />
+                <Typography variant="h6">Total Items</Typography>
+              </Box>
               <Typography variant="h4">{overview.totalItems}</Typography>
             </CardContent>
           </Card>
@@ -143,9 +94,10 @@ const Analytics = () => {
         <Grid item xs={12} sm={6} md={3}>
           <Card>
             <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Active Routes
-              </Typography>
+              <Box display="flex" alignItems="center" mb={2}>
+                <ShippingIcon color="primary" sx={{ mr: 1 }} />
+                <Typography variant="h6">Active Routes</Typography>
+              </Box>
               <Typography variant="h4">{overview.activeRoutes}</Typography>
             </CardContent>
           </Card>
@@ -153,9 +105,10 @@ const Analytics = () => {
         <Grid item xs={12} sm={6} md={3}>
           <Card>
             <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Low Stock Items
-              </Typography>
+              <Box display="flex" alignItems="center" mb={2}>
+                <WarningIcon color="warning" sx={{ mr: 1 }} />
+                <Typography variant="h6">Low Stock Items</Typography>
+              </Box>
               <Typography variant="h4">{overview.lowStockItems}</Typography>
             </CardContent>
           </Card>
@@ -163,9 +116,10 @@ const Analytics = () => {
         <Grid item xs={12} sm={6} md={3}>
           <Card>
             <CardContent>
-              <Typography variant="h6" gutterBottom>
-                On-Time Delivery
-              </Typography>
+              <Box display="flex" alignItems="center" mb={2}>
+                <TrendingUpIcon color="success" sx={{ mr: 1 }} />
+                <Typography variant="h6">On-Time Delivery</Typography>
+              </Box>
               <Typography variant="h4">{performance.onTimeDelivery}%</Typography>
             </CardContent>
           </Card>
@@ -174,7 +128,7 @@ const Analytics = () => {
 
       {/* Charts */}
       <Grid container spacing={3}>
-        {/* Stock Levels Trend */}
+        {/* Stock Levels Chart */}
         <Grid item xs={12} md={8}>
           <Card>
             <CardContent>
@@ -265,38 +219,15 @@ const Analytics = () => {
           </Card>
         </Grid>
 
-        {/* Delivery Times */}
-        <Grid item xs={12} md={6}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Delivery Times
-              </Typography>
-              <Box height={300}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={routes.deliveryTimes}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="time" />
-                    <YAxis />
-                    <Tooltip />
-                    <Legend />
-                    <Bar dataKey="count" fill="#8884d8" name="Deliveries" />
-                  </BarChart>
-                </ResponsiveContainer>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-
         {/* Performance Metrics */}
-        <Grid item xs={12}>
+        <Grid item xs={12} md={6}>
           <Card>
             <CardContent>
               <Typography variant="h6" gutterBottom>
                 Performance Metrics
               </Typography>
               <Grid container spacing={2}>
-                <Grid item xs={12} sm={6} md={3}>
+                <Grid item xs={6}>
                   <Box textAlign="center" p={2}>
                     <Typography variant="h4" color="primary">
                       {performance.routeOptimization}%
@@ -306,7 +237,7 @@ const Analytics = () => {
                     </Typography>
                   </Box>
                 </Grid>
-                <Grid item xs={12} sm={6} md={3}>
+                <Grid item xs={6}>
                   <Box textAlign="center" p={2}>
                     <Typography variant="h4" color="primary">
                       {performance.inventoryTurnover}%
@@ -316,7 +247,7 @@ const Analytics = () => {
                     </Typography>
                   </Box>
                 </Grid>
-                <Grid item xs={12} sm={6} md={3}>
+                <Grid item xs={6}>
                   <Box textAlign="center" p={2}>
                     <Typography variant="h4" color="success.main">
                       ${performance.costSavings}
@@ -326,7 +257,7 @@ const Analytics = () => {
                     </Typography>
                   </Box>
                 </Grid>
-                <Grid item xs={12} sm={6} md={3}>
+                <Grid item xs={6}>
                   <Box textAlign="center" p={2}>
                     <Typography variant="h4" color="success.main">
                       {performance.onTimeDelivery}%
@@ -345,4 +276,4 @@ const Analytics = () => {
   );
 };
 
-export default Analytics; 
+export default Dashboard; 
