@@ -17,6 +17,12 @@ import yaml
 import base64
 import secrets
 import string
+import jwt
+import bcrypt
+from datetime import timedelta
+import os
+from flask import request, jsonify
+from flask_jwt_extended import get_jwt_identity
 
 class ValidationError(Exception):
     """Custom validation error."""
@@ -163,61 +169,79 @@ class DataValidator:
             return False
 
 class SecurityHelper:
-    """Security-related utilities."""
+    def __init__(self):
+        self.secret_key = os.getenv('JWT_SECRET')
+        self.algorithm = 'HS256'
+        self.token_expiry = timedelta(days=1)
     
-    @staticmethod
-    def generate_password(length: int = 12) -> str:
-        """Generate secure random password.
-        
-        Args:
-            length: Password length
+    def hash_password(self, password):
+        """Hash a password using bcrypt."""
+        salt = bcrypt.gensalt()
+        return bcrypt.hashpw(password.encode('utf-8'), salt)
+    
+    def verify_password(self, password, hashed):
+        """Verify a password against its hash."""
+        return bcrypt.checkpw(password.encode('utf-8'), hashed)
+    
+    def generate_token(self, user_id):
+        """Generate a JWT token for a user."""
+        payload = {
+            'user_id': user_id,
+            'exp': datetime.utcnow() + self.token_expiry
+        }
+        return jwt.encode(payload, self.secret_key, algorithm=self.algorithm)
+    
+    def verify_token(self, token):
+        """Verify a JWT token."""
+        try:
+            payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
+            return payload['user_id']
+        except jwt.ExpiredSignatureError:
+            return None
+        except jwt.InvalidTokenError:
+            return None
+    
+    def token_required(self, f):
+        """Decorator to require a valid JWT token."""
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            token = request.headers.get('Authorization')
             
-        Returns:
-            Generated password
-        """
-        alphabet = string.ascii_letters + string.digits + string.punctuation
-        return ''.join(secrets.choice(alphabet) for _ in range(length))
-        
-    @staticmethod
-    def hash_password(password: str) -> str:
-        """Hash password using SHA-256.
-        
-        Args:
-            password: Password to hash
+            if not token:
+                return jsonify({'error': 'Token is missing'}), 401
             
-        Returns:
-            Hashed password
-        """
-        salt = secrets.token_hex(16)
-        hash_obj = hashlib.sha256((password + salt).encode())
-        return f"{salt}${hash_obj.hexdigest()}"
+            try:
+                token = token.split(' ')[1]  # Remove 'Bearer ' prefix
+                user_id = self.verify_token(token)
+                
+                if not user_id:
+                    return jsonify({'error': 'Invalid token'}), 401
+                
+                return f(*args, **kwargs)
+            except Exception as e:
+                return jsonify({'error': str(e)}), 401
         
-    @staticmethod
-    def verify_password(password: str, hashed: str) -> bool:
-        """Verify password against hash.
-        
-        Args:
-            password: Password to verify
-            hashed: Hashed password
+        return decorated
+    
+    def admin_required(self, f):
+        """Decorator to require admin privileges."""
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            user_id = get_jwt_identity()
             
-        Returns:
-            True if password matches hash
-        """
-        salt, hash_value = hashed.split('$')
-        hash_obj = hashlib.sha256((password + salt).encode())
-        return hash_obj.hexdigest() == hash_value
-        
-    @staticmethod
-    def generate_token(length: int = 32) -> str:
-        """Generate secure random token.
-        
-        Args:
-            length: Token length
+            if not user_id:
+                return jsonify({'error': 'Authentication required'}), 401
             
-        Returns:
-            Generated token
-        """
-        return secrets.token_urlsafe(length)
+            # Check if user is admin
+            # This is a placeholder - implement your admin check logic here
+            is_admin = True  # Replace with actual admin check
+            
+            if not is_admin:
+                return jsonify({'error': 'Admin privileges required'}), 403
+            
+            return f(*args, **kwargs)
+        
+        return decorated
 
 class FileHelper:
     """File handling utilities."""

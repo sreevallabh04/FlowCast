@@ -80,6 +80,8 @@ import pyarrow.memory_pool
 import pyarrow.cuda
 import pyarrow.gandiva
 import pyarrow.plasma
+from flask_migrate import Migrate
+from models import db
 
 @dataclass
 class MigrationConfig:
@@ -134,9 +136,11 @@ class MigrationConfig:
     enable_deduplication: bool
 
 class DataMigration:
-    def __init__(self, config_path: str = 'config/migration_config.yaml'):
-        """Initialize the migration system."""
-        self.config_path = config_path
+    def __init__(self, app):
+        self.app = app
+        self.migrate = Migrate(app, db)
+        self.logger = logging.getLogger('flowcast')
+        self.config_path = 'config/migration_config.yaml'
         self.config = self._load_config()
         self.migration_queue = queue.Queue()
         self.processing = False
@@ -937,6 +941,176 @@ class DataMigration:
             
         except Exception as e:
             print(f"Error clearing migrations: {str(e)}")
+            raise
+
+    def init_migrations(self):
+        """Initialize database migrations."""
+        try:
+            with self.app.app_context():
+                self.migrate.init_app(self.app, db)
+                self.logger.info('Database migrations initialized successfully')
+        except Exception as e:
+            self.logger.error(f'Failed to initialize database migrations: {str(e)}')
+            raise
+    
+    def create_migration(self, message):
+        """Create a new migration."""
+        try:
+            with self.app.app_context():
+                self.migrate.migrate(message=message)
+                self.logger.info(f'Created new migration: {message}')
+        except Exception as e:
+            self.logger.error(f'Failed to create migration: {str(e)}')
+            raise
+    
+    def upgrade_database(self, revision='head'):
+        """Upgrade database to specified revision."""
+        try:
+            with self.app.app_context():
+                self.migrate.upgrade(revision=revision)
+                self.logger.info(f'Database upgraded to revision: {revision}')
+        except Exception as e:
+            self.logger.error(f'Failed to upgrade database: {str(e)}')
+            raise
+    
+    def downgrade_database(self, revision):
+        """Downgrade database to specified revision."""
+        try:
+            with self.app.app_context():
+                self.migrate.downgrade(revision=revision)
+                self.logger.info(f'Database downgraded to revision: {revision}')
+        except Exception as e:
+            self.logger.error(f'Failed to downgrade database: {str(e)}')
+            raise
+    
+    def get_migration_history(self):
+        """Get database migration history."""
+        try:
+            with self.app.app_context():
+                history = self.migrate.history()
+                return history
+        except Exception as e:
+            self.logger.error(f'Failed to get migration history: {str(e)}')
+            raise
+    
+    def get_current_revision(self):
+        """Get current database revision."""
+        try:
+            with self.app.app_context():
+                current = self.migrate.current()
+                return current
+        except Exception as e:
+            self.logger.error(f'Failed to get current revision: {str(e)}')
+            raise
+    
+    def check_migration_status(self):
+        """Check if database is up to date."""
+        try:
+            with self.app.app_context():
+                current = self.migrate.current()
+                head = self.migrate.head()
+                return current == head
+        except Exception as e:
+            self.logger.error(f'Failed to check migration status: {str(e)}')
+            raise
+    
+    def create_initial_schema(self):
+        """Create initial database schema."""
+        try:
+            with self.app.app_context():
+                db.create_all()
+                self.logger.info('Initial database schema created successfully')
+        except Exception as e:
+            self.logger.error(f'Failed to create initial schema: {str(e)}')
+            raise
+    
+    def update_schema(self):
+        """Update database schema based on model changes."""
+        try:
+            with self.app.app_context():
+                db.create_all()
+                self.logger.info('Database schema updated successfully')
+        except Exception as e:
+            self.logger.error(f'Failed to update schema: {str(e)}')
+            raise
+    
+    def backup_schema(self):
+        """Backup current database schema."""
+        try:
+            with self.app.app_context():
+                # Get current schema
+                schema = db.metadata.tables
+                
+                # Save schema to file
+                timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+                filename = f'schema_backup_{timestamp}.sql'
+                
+                with open(filename, 'w') as f:
+                    for table in schema.values():
+                        f.write(f'-- Table: {table.name}\n')
+                        f.write(f'CREATE TABLE IF NOT EXISTS {table.name} (\n')
+                        
+                        for column in table.columns:
+                            f.write(f'    {column.name} {column.type},\n')
+                        
+                        f.write(');\n\n')
+                
+                self.logger.info(f'Schema backup created: {filename}')
+                return filename
+        except Exception as e:
+            self.logger.error(f'Failed to backup schema: {str(e)}')
+            raise
+    
+    def restore_schema(self, backup_file):
+        """Restore database schema from backup."""
+        try:
+            with self.app.app_context():
+                # Read backup file
+                with open(backup_file, 'r') as f:
+                    schema_sql = f.read()
+                
+                # Execute schema SQL
+                db.session.execute(schema_sql)
+                db.session.commit()
+                
+                self.logger.info(f'Schema restored from backup: {backup_file}')
+        except Exception as e:
+            self.logger.error(f'Failed to restore schema: {str(e)}')
+            raise
+    
+    def validate_schema(self):
+        """Validate database schema against models."""
+        try:
+            with self.app.app_context():
+                # Get current schema
+                current_schema = db.metadata.tables
+                
+                # Get model schema
+                model_schema = {}
+                for model in db.Model.__subclasses__():
+                    model_schema[model.__tablename__] = model.__table__
+                
+                # Compare schemas
+                differences = []
+                for table_name, table in model_schema.items():
+                    if table_name not in current_schema:
+                        differences.append(f'Missing table: {table_name}')
+                    else:
+                        current_table = current_schema[table_name]
+                        for column in table.columns:
+                            if column.name not in current_table.columns:
+                                differences.append(f'Missing column: {table_name}.{column.name}')
+                
+                if differences:
+                    self.logger.warning('Schema validation found differences:')
+                    for diff in differences:
+                        self.logger.warning(diff)
+                    return False
+                
+                self.logger.info('Schema validation successful')
+                return True
+        except Exception as e:
+            self.logger.error(f'Failed to validate schema: {str(e)}')
             raise
 
 # Example usage

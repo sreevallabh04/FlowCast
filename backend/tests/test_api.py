@@ -1,256 +1,167 @@
-import pytest
+import unittest
 import json
-import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
 from app import app
-from models.arima import ARIMAModel
-from models.prophet import ProphetModel
-from models.lstm import LSTMModel
-from models.xgboost import XGBoostModel
-from data.generator import DataGenerator
-from data.processor import DataProcessor
-from data.validation import DataValidator
-from data.metrics import MetricsCalculator
+import pandas as pd
+from datetime import datetime, timedelta
 
-@pytest.fixture
-def client():
-    app.config['TESTING'] = True
-    with app.test_client() as client:
-        yield client
-
-@pytest.fixture
-def sample_data():
-    # Generate sample data
-    generator = DataGenerator()
-    data = generator.generate_data(
-        num_records=1000,
-        start_date='2020-01-01',
-        end_date='2023-12-31'
-    )
-    return data
-
-@pytest.fixture
-def processed_data(sample_data):
-    # Process sample data
-    processor = DataProcessor()
-    processed = processor.process_data(sample_data)
-    return processed
-
-class TestForecastEndpoint:
-    def test_forecast_success(self, client, processed_data):
-        # Test successful forecast request
-        response = client.post('/api/forecast', json={
-            'data': processed_data.to_dict(orient='records'),
-            'model': 'arima'
-        })
-        assert response.status_code == 200
-        data = response.get_json()
-        assert 'forecast' in data
-        assert 'metrics' in data
-        assert len(data['forecast']) > 0
-        assert all(metric >= 0 for metric in data['metrics'].values())
+class TestAPI(unittest.TestCase):
+    def setUp(self):
+        """Set up test client and test data."""
+        self.app = app.test_client()
+        self.app.testing = True
         
-    def test_forecast_invalid_data(self, client):
-        # Test forecast with invalid data
-        response = client.post('/api/forecast', json={
-            'data': [],
-            'model': 'arima'
-        })
-        assert response.status_code == 400
-        data = response.get_json()
-        assert 'error' in data
-        
-    def test_forecast_invalid_model(self, client, processed_data):
-        # Test forecast with invalid model
-        response = client.post('/api/forecast', json={
-            'data': processed_data.to_dict(orient='records'),
-            'model': 'invalid_model'
-        })
-        assert response.status_code == 400
-        data = response.get_json()
-        assert 'error' in data
-        
-    def test_forecast_missing_parameters(self, client):
-        # Test forecast with missing parameters
-        response = client.post('/api/forecast', json={})
-        assert response.status_code == 400
-        data = response.get_json()
-        assert 'error' in data
-        
-    def test_forecast_all_models(self, client, processed_data):
-        # Test forecast with all available models
-        models = ['arima', 'prophet', 'lstm', 'xgboost']
-        for model in models:
-            response = client.post('/api/forecast', json={
-                'data': processed_data.to_dict(orient='records'),
-                'model': model
-            })
-            assert response.status_code == 200
-            data = response.get_json()
-            assert 'forecast' in data
-            assert 'metrics' in data
+        # Create sample data
+        self.sample_data = {
+            'product_id': 'PROD001',
+            'store_id': 'STORE001',
+            'start_date': '2024-01-01',
+            'end_date': '2024-01-31'
+        }
 
-class TestMetricsEndpoint:
-    def test_metrics_success(self, client, processed_data):
-        # Test successful metrics request
-        response = client.post('/api/metrics', json={
-            'data': processed_data.to_dict(orient='records')
-        })
-        assert response.status_code == 200
-        data = response.get_json()
-        assert 'metrics' in data
-        assert all(metric >= 0 for metric in data['metrics'].values())
+    def test_health_check(self):
+        """Test health check endpoint."""
+        response = self.app.get('/health')
+        data = json.loads(response.data)
         
-    def test_metrics_invalid_data(self, client):
-        # Test metrics with invalid data
-        response = client.post('/api/metrics', json={
-            'data': []
-        })
-        assert response.status_code == 400
-        data = response.get_json()
-        assert 'error' in data
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(data['status'], 'healthy')
+
+    def test_predict_demand(self):
+        """Test demand prediction endpoint."""
+        response = self.app.post(
+            '/predict-demand',
+            data=json.dumps(self.sample_data),
+            content_type='application/json'
+        )
+        data = json.loads(response.data)
         
-    def test_metrics_missing_parameters(self, client):
-        # Test metrics with missing parameters
-        response = client.post('/api/metrics', json={})
-        assert response.status_code == 400
-        data = response.get_json()
-        assert 'error' in data
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('predictions', data)
+        self.assertIn('confidence_intervals', data)
 
-class TestValidationEndpoint:
-    def test_validation_success(self, client, processed_data):
-        # Test successful validation request
-        response = client.post('/api/validate', json={
-            'data': processed_data.to_dict(orient='records')
-        })
-        assert response.status_code == 200
-        data = response.get_json()
-        assert 'is_valid' in data
-        assert 'errors' in data
+    def test_optimize_inventory(self):
+        """Test inventory optimization endpoint."""
+        response = self.app.post(
+            '/optimize-inventory',
+            data=json.dumps(self.sample_data),
+            content_type='application/json'
+        )
+        data = json.loads(response.data)
         
-    def test_validation_invalid_data(self, client):
-        # Test validation with invalid data
-        response = client.post('/api/validate', json={
-            'data': []
-        })
-        assert response.status_code == 400
-        data = response.get_json()
-        assert 'error' in data
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('safety_stock', data)
+        self.assertIn('reorder_point', data)
+        self.assertIn('recommendations', data)
+
+    def test_optimize_routes(self):
+        """Test route optimization endpoint."""
+        route_data = {
+            'locations': [
+                {'lat': 40.7128, 'lng': -74.0060},
+                {'lat': 40.7589, 'lng': -73.9851},
+                {'lat': 40.7829, 'lng': -73.9654}
+            ],
+            'demands': [0, 100, 150],
+            'vehicle_capacity': 500,
+            'num_vehicles': 2
+        }
         
-    def test_validation_missing_parameters(self, client):
-        # Test validation with missing parameters
-        response = client.post('/api/validate', json={})
-        assert response.status_code == 400
-        data = response.get_json()
-        assert 'error' in data
-
-class TestProcessingEndpoint:
-    def test_processing_success(self, client, sample_data):
-        # Test successful processing request
-        response = client.post('/api/process', json={
-            'data': sample_data.to_dict(orient='records')
-        })
-        assert response.status_code == 200
-        data = response.get_json()
-        assert 'processed_data' in data
-        assert len(data['processed_data']) > 0
+        response = self.app.post(
+            '/optimize-routes',
+            data=json.dumps(route_data),
+            content_type='application/json'
+        )
+        data = json.loads(response.data)
         
-    def test_processing_invalid_data(self, client):
-        # Test processing with invalid data
-        response = client.post('/api/process', json={
-            'data': []
-        })
-        assert response.status_code == 400
-        data = response.get_json()
-        assert 'error' in data
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('routes', data)
+        self.assertIn('total_distance', data)
+        self.assertIn('total_duration', data)
+
+    def test_analytics(self):
+        """Test analytics endpoint."""
+        response = self.app.get(
+            '/analytics',
+            query_string=self.sample_data
+        )
+        data = json.loads(response.data)
         
-    def test_processing_missing_parameters(self, client):
-        # Test processing with missing parameters
-        response = client.post('/api/process', json={})
-        assert response.status_code == 400
-        data = response.get_json()
-        assert 'error' in data
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('demand_metrics', data)
+        self.assertIn('inventory_metrics', data)
+        self.assertIn('route_metrics', data)
 
-def test_error_handling(client):
-    # Test invalid JSON
-    response = client.post('/api/forecast', data='invalid json')
-    assert response.status_code == 400
-    data = response.get_json()
-    assert 'error' in data
-    
-    # Test invalid content type
-    response = client.post('/api/forecast', data='{"data": []}')
-    assert response.status_code == 400
-    data = response.get_json()
-    assert 'error' in data
-    
-    # Test invalid endpoint
-    response = client.get('/api/invalid')
-    assert response.status_code == 404
-    data = response.get_json()
-    assert 'error' in data
+    def test_invalid_input(self):
+        """Test invalid input handling."""
+        # Test missing required fields
+        invalid_data = {
+            'product_id': 'PROD001'
+            # Missing store_id
+        }
+        
+        response = self.app.post(
+            '/predict-demand',
+            data=json.dumps(invalid_data),
+            content_type='application/json'
+        )
+        
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('error', json.loads(response.data))
 
-def test_performance(client, processed_data):
-    # Test response time for forecast endpoint
-    start_time = datetime.now()
-    response = client.post('/api/forecast', json={
-        'data': processed_data.to_dict(orient='records'),
-        'model': 'arima'
-    })
-    end_time = datetime.now()
-    
-    assert response.status_code == 200
-    assert (end_time - start_time).total_seconds() < 5  # Response within 5 seconds
-    
-    # Test response time for metrics endpoint
-    start_time = datetime.now()
-    response = client.post('/api/metrics', json={
-        'data': processed_data.to_dict(orient='records')
-    })
-    end_time = datetime.now()
-    
-    assert response.status_code == 200
-    assert (end_time - start_time).total_seconds() < 2  # Response within 2 seconds
+    def test_error_handling(self):
+        """Test error handling."""
+        # Test invalid date format
+        invalid_data = {
+            'product_id': 'PROD001',
+            'store_id': 'STORE001',
+            'start_date': 'invalid-date',
+            'end_date': '2024-01-31'
+        }
+        
+        response = self.app.post(
+            '/predict-demand',
+            data=json.dumps(invalid_data),
+            content_type='application/json'
+        )
+        
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('error', json.loads(response.data))
 
-def test_data_consistency(client, processed_data):
-    # Test data consistency across endpoints
-    # First get metrics
-    metrics_response = client.post('/api/metrics', json={
-        'data': processed_data.to_dict(orient='records')
-    })
-    assert metrics_response.status_code == 200
-    metrics_data = metrics_response.get_json()
-    
-    # Then get forecast
-    forecast_response = client.post('/api/forecast', json={
-        'data': processed_data.to_dict(orient='records'),
-        'model': 'arima'
-    })
-    assert forecast_response.status_code == 200
-    forecast_data = forecast_response.get_json()
-    
-    # Compare metrics
-    assert metrics_data['metrics'] == forecast_data['metrics']
+    def test_rate_limiting(self):
+        """Test rate limiting."""
+        # Make multiple requests in quick succession
+        for _ in range(10):
+            response = self.app.post(
+                '/predict-demand',
+                data=json.dumps(self.sample_data),
+                content_type='application/json'
+            )
+        
+        # The last request should be rate limited
+        self.assertEqual(response.status_code, 429)
+        self.assertIn('error', json.loads(response.data))
 
-def test_concurrent_requests(client, processed_data):
-    # Test handling of concurrent requests
-    import threading
-    
-    def make_request():
-        response = client.post('/api/forecast', json={
-            'data': processed_data.to_dict(orient='records'),
-            'model': 'arima'
-        })
-        assert response.status_code == 200
-    
-    # Create multiple threads
-    threads = []
-    for _ in range(5):
-        thread = threading.Thread(target=make_request)
-        threads.append(thread)
-        thread.start()
-    
-    # Wait for all threads to complete
-    for thread in threads:
-        thread.join() 
+    def test_caching(self):
+        """Test response caching."""
+        # First request
+        response1 = self.app.post(
+            '/predict-demand',
+            data=json.dumps(self.sample_data),
+            content_type='application/json'
+        )
+        
+        # Second request with same data
+        response2 = self.app.post(
+            '/predict-demand',
+            data=json.dumps(self.sample_data),
+            content_type='application/json'
+        )
+        
+        # Check if response times are different (cached response should be faster)
+        self.assertLess(
+            response2.elapsed.total_seconds(),
+            response1.elapsed.total_seconds()
+        )
+
+if __name__ == '__main__':
+    unittest.main() 

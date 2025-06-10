@@ -1,122 +1,147 @@
-# FlowCast - Supply Chain Forecasting & Optimization Platform
+# FlowCast - Supply Chain Analytics Platform
 
-FlowCast is a comprehensive supply chain forecasting and optimization platform that leverages AI to predict demand, manage inventory, optimize delivery routes, and minimize waste. The system processes massive amounts of historical and real-time data to provide actionable insights for supply chain management.
+FlowCast is a comprehensive supply chain analytics platform that helps businesses optimize their operations through data-driven insights and forecasting.
 
 ## Features
 
-- **Demand Forecasting**
-  - Machine learning-based demand prediction
-  - Weather, event, and economic factor integration
-  - Confidence intervals for predictions
-  - Real-time updates
+- **Real-time Analytics Dashboard**
+  - Sales trends and KPIs
+  - Inventory status and alerts
+  - Delivery tracking and optimization
+  - Weather impact analysis
 
-- **Inventory Optimization**
-  - Smart safety stock calculation
-  - Dynamic reorder point prediction
-  - Economic order quantity optimization
-  - Multi-location inventory management
+- **Demand Forecasting**
+  - Machine learning-based predictions
+  - Confidence interval analysis
+  - Seasonal pattern detection
+  - Product correlation analysis
+
+- **Inventory Management**
+  - Stock level monitoring
+  - Reorder point alerts
+  - Expiry date tracking
+  - Value optimization
 
 - **Route Optimization**
-  - Real-time traffic-aware routing
-  - Time window constraints
-  - Multi-vehicle optimization
-  - Delivery performance tracking
+  - Delivery route planning
+  - Real-time tracking
+  - Weather-aware routing
+  - Capacity optimization
 
-- **Waste Reduction**
-  - Expiry prediction
-  - Donation coordination
-  - Markdown optimization
-  - Freshness tracking
+- **Data Export & Integration**
+  - Multiple export formats (CSV, JSON, Excel)
+  - API integration
+  - Webhook support
+  - Automated backups
 
 ## Tech Stack
 
 ### Backend
-- Python 3.9
-- Flask (REST API)
-- scikit-learn (ML models)
-- OR-Tools (optimization)
-- PostgreSQL (database)
-- Redis (caching)
+- Flask (Python web framework)
+- SQLAlchemy (ORM)
+- JWT Authentication
+- Redis (Caching)
+- Pandas & NumPy (Data processing)
+- Scikit-learn (Machine learning)
+- Plotly (Data visualization)
 
 ### Frontend
-- React 18
+- React.js
 - Material-UI
-- Redux Toolkit
-- Recharts
-- Socket.IO
+- Chart.js
+- Google Maps API
 
 ## Getting Started
 
 ### Prerequisites
-- Docker and Docker Compose
-- Node.js 16+ (for local development)
-- Python 3.9+ (for local development)
+- Python 3.8+
+- Node.js 14+
+- Redis
+- PostgreSQL (optional)
 
 ### Installation
 
 1. Clone the repository:
-   ```bash
-   git clone https://github.com/yourusername/flowcast.git
-   cd flowcast
-   ```
+```bash
+git clone https://github.com/yourusername/flowcast.git
+cd flowcast
+```
 
-2. Set up environment variables:
-   ```bash
-   cp .env.example .env
-   # Edit .env with your configuration
-   ```
+2. Set up the backend:
+```bash
+cd backend
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -r requirements.txt
+```
 
-3. Start the services:
-   ```bash
-   docker-compose up -d
-   ```
+3. Configure environment variables:
+```bash
+cp .env.example .env
+# Edit .env with your configuration
+```
 
-4. Access the application:
-   - Frontend: http://localhost:3000
-   - Backend API: http://localhost:5000
-   - API Documentation: http://localhost:5000/docs
+4. Initialize the database:
+```bash
+flask db init
+flask db migrate
+flask db upgrade
+```
 
-### Development Setup
+5. Set up the frontend:
+```bash
+cd ../frontend
+npm install
+```
 
-1. Backend:
-   ```bash
-   cd backend
-   python -m venv venv
-   source venv/bin/activate  # or `venv\Scripts\activate` on Windows
-   pip install -r requirements.txt
-   flask run
-   ```
+6. Start the development servers:
 
-2. Frontend:
-   ```bash
-   cd frontend
-   npm install
-   npm start
-   ```
+Backend:
+```bash
+cd backend
+flask run
+```
 
-## API Endpoints
+Frontend:
+```bash
+cd frontend
+npm start
+```
 
-### Demand Forecasting
-- `POST /api/predict-demand` - Get demand predictions
-- `GET /api/demand-metrics` - Get demand forecasting metrics
+## API Documentation
 
-### Inventory Optimization
-- `POST /api/optimize-inventory` - Optimize inventory levels
-- `GET /api/inventory-metrics` - Get inventory metrics
+### Authentication
+- POST /api/register - Register a new user
+- POST /api/login - Login and get JWT token
 
-### Route Optimization
-- `POST /api/optimize-routes` - Optimize delivery routes
-- `GET /api/routing-metrics` - Get routing metrics
+### Dashboard
+- GET /api/dashboard - Get dashboard data and KPIs
+
+### Forecasting
+- GET /api/forecast - Get demand forecasts
+- GET /api/forecast/seasonal - Get seasonal patterns
+
+### Inventory
+- GET /api/inventory - Get inventory status
+- PUT /api/inventory/:id - Update inventory
+
+### Routes
+- GET /api/routes - Get optimized routes
+- GET /api/routes/:id/directions - Get route directions
 
 ### Analytics
-- `GET /api/analytics` - Get comprehensive analytics
+- GET /api/analytics - Get analytics data
+- GET /api/analytics/export - Export analytics data
+
+### Webhooks
+- POST /api/webhooks - Handle external webhooks
 
 ## Contributing
 
 1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
 5. Open a Pull Request
 
 ## License
@@ -125,6 +150,15 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Acknowledgments
 
-- OpenWeatherMap for weather data
-- Google Maps for routing
-- FRED for economic indicators 
+- [Flask](https://flask.palletsprojects.com/)
+- [React](https://reactjs.org/)
+- [Material-UI](https://material-ui.com/)
+- [Chart.js](https://www.chartjs.org/)
+- [Google Maps API](https://developers.google.com/maps)
+
+## Screenshots
+
+![Dashboard](docs/screenshots/dashboard.png)
+![Demand Forecast](docs/screenshots/demand.png)
+![Inventory Optimization](docs/screenshots/inventory.png)
+![Route Optimization](docs/screenshots/routes.png) 

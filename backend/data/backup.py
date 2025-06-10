@@ -59,6 +59,7 @@ import b2fs
 import backblazefs
 import wasabifs
 import miniofs
+from models import db, User, Product, Store, Transaction, Weather, Route, Forecast, Log
 
 @dataclass
 class BackupConfig:
@@ -105,336 +106,262 @@ class BackupConfig:
     enable_deduplication: bool
 
 class DataBackup:
-    def __init__(self, config_path: str = 'config/backup_config.yaml'):
-        """Initialize the backup system."""
-        self.config_path = config_path
-        self.config = self._load_config()
-        self.backup_queue = queue.Queue()
-        self.processing = False
-        self.processing_thread = None
-        self.storage_client = None
+    def __init__(self, app):
+        self.app = app
+        self.logger = logging.getLogger('flowcast')
+        self.backup_dir = 'backups'
         
-        # Initialize storage
-        self._init_storage()
-        
-        # Start processing
-        self.start_processing()
-
-    def _load_config(self) -> BackupConfig:
-        """Load backup configuration."""
+        # Create backup directory if it doesn't exist
+        if not os.path.exists(self.backup_dir):
+            os.makedirs(self.backup_dir)
+    
+    def create_backup(self, format='json'):
+        """Create a backup of the database."""
         try:
-            with open(self.config_path, 'r') as f:
-                config_dict = yaml.safe_load(f)
-            return BackupConfig(**config_dict)
-        except Exception as e:
-            print(f"Error loading backup configuration: {str(e)}")
-            raise
-
-    def _init_storage(self) -> None:
-        """Initialize storage client."""
-        try:
-            if self.config.enable_cloud:
-                if self.config.storage_type == 's3':
-                    self.storage_client = boto3.client('s3', **self.config.storage_config)
-                elif self.config.storage_type == 'azure':
-                    self.storage_client = azure.storage.blob.BlobServiceClient(**self.config.storage_config)
-                elif self.config.storage_type == 'gcs':
-                    self.storage_client = google.cloud.storage.Client(**self.config.storage_config)
-                elif self.config.storage_type == 'dropbox':
-                    self.storage_client = dropbox.Dropbox(**self.config.storage_config)
-                elif self.config.storage_type == 'onedrive':
-                    self.storage_client = onedrive.OneDriveClient(**self.config.storage_config)
-                elif self.config.storage_type == 'gdrive':
-                    self.storage_client = gdrive.GoogleDriveClient(**self.config.storage_config)
-                elif self.config.storage_type == 'box':
-                    self.storage_client = boxsdk.Client(**self.config.storage_config)
-                elif self.config.storage_type == 'b2':
-                    self.storage_client = b2sdk.B2Api(**self.config.storage_config)
-                elif self.config.storage_type == 'backblaze':
-                    self.storage_client = backblaze.BackblazeClient(**self.config.storage_config)
-                elif self.config.storage_type == 'wasabi':
-                    self.storage_client = wasabi.WasabiClient(**self.config.storage_config)
-                elif self.config.storage_type == 'minio':
-                    self.storage_client = minio.MinioClient(**self.config.storage_config)
-            
-        except Exception as e:
-            print(f"Error initializing storage client: {str(e)}")
-            raise
-
-    def start_processing(self) -> None:
-        """Start backup processing."""
-        try:
-            if not self.processing:
-                self.processing = True
-                self.processing_thread = threading.Thread(target=self._process_backups)
-                self.processing_thread.daemon = True
-                self.processing_thread.start()
-            
-        except Exception as e:
-            print(f"Error starting backup processing: {str(e)}")
-            raise
-
-    def stop_processing(self) -> None:
-        """Stop backup processing."""
-        try:
-            self.processing = False
-            if self.processing_thread:
-                self.processing_thread.join()
-            
-        except Exception as e:
-            print(f"Error stopping backup processing: {str(e)}")
-            raise
-
-    def _process_backups(self) -> None:
-        """Process backups from the queue."""
-        try:
-            while self.processing:
-                try:
-                    # Get backup from queue
-                    backup = self.backup_queue.get(timeout=1)
-                    
-                    # Process backup
-                    self._create_backup(backup)
-                    
-                    # Mark task as done
-                    self.backup_queue.task_done()
-                    
-                except queue.Empty:
-                    continue
+            with self.app.app_context():
+                # Generate timestamp
+                timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+                backup_file = f'{self.backup_dir}/backup_{timestamp}.{format}'
                 
+                # Get all data
+                data = {
+                    'users': self._get_table_data(User),
+                    'products': self._get_table_data(Product),
+                    'stores': self._get_table_data(Store),
+                    'transactions': self._get_table_data(Transaction),
+                    'weather': self._get_table_data(Weather),
+                    'routes': self._get_table_data(Route),
+                    'forecasts': self._get_table_data(Forecast),
+                    'logs': self._get_table_data(Log)
+                }
+                
+                # Save data based on format
+                if format == 'json':
+                    self._save_json(data, backup_file)
+                elif format == 'csv':
+                    self._save_csv(data, backup_file)
+                else:
+                    raise ValueError(f'Unsupported backup format: {format}')
+                
+                self.logger.info(f'Backup created successfully: {backup_file}')
+                return backup_file
         except Exception as e:
-            print(f"Error processing backups: {str(e)}")
+            self.logger.error(f'Failed to create backup: {str(e)}')
             raise
-
-    def _create_backup(self, backup: Dict) -> None:
-        """Create a backup."""
+    
+    def restore_backup(self, backup_file):
+        """Restore database from backup."""
         try:
-            # Get backup type
-            backup_type = backup.get('type', 'full')
-            
-            # Create backup directory
-            backup_dir = os.path.join(self.config.backup_dir, backup_type)
-            os.makedirs(backup_dir, exist_ok=True)
-            
-            # Create backup file
-            backup_file = os.path.join(backup_dir, f"{backup['id']}.tar.gz")
-            
-            # Create tar file
-            with tarfile.open(backup_file, 'w:gz') as tar:
-                # Add files to tar
-                for file in backup['files']:
-                    tar.add(file)
-            
-            # Upload to cloud storage if enabled
-            if self.config.enable_cloud:
-                self._upload_backup(backup_file)
-            
-            # Clean up old backups
-            self._cleanup_old_backups()
-            
+            with self.app.app_context():
+                # Determine backup format
+                format = backup_file.split('.')[-1]
+                
+                # Load data based on format
+                if format == 'json':
+                    data = self._load_json(backup_file)
+                elif format == 'csv':
+                    data = self._load_csv(backup_file)
+                else:
+                    raise ValueError(f'Unsupported backup format: {format}')
+                
+                # Restore data
+                self._restore_table_data(User, data['users'])
+                self._restore_table_data(Product, data['products'])
+                self._restore_table_data(Store, data['stores'])
+                self._restore_table_data(Transaction, data['transactions'])
+                self._restore_table_data(Weather, data['weather'])
+                self._restore_table_data(Route, data['routes'])
+                self._restore_table_data(Forecast, data['forecasts'])
+                self._restore_table_data(Log, data['logs'])
+                
+                self.logger.info(f'Backup restored successfully: {backup_file}')
         except Exception as e:
-            print(f"Error creating backup: {str(e)}")
+            self.logger.error(f'Failed to restore backup: {str(e)}')
             raise
-
-    def _upload_backup(self, backup_file: str) -> None:
-        """Upload backup to cloud storage."""
+    
+    def list_backups(self):
+        """List all available backups."""
         try:
-            if self.config.storage_type == 's3':
-                self.storage_client.upload_file(
-                    backup_file,
-                    self.config.storage_config['bucket'],
-                    os.path.basename(backup_file)
-                )
-            elif self.config.storage_type == 'azure':
-                with open(backup_file, 'rb') as f:
-                    self.storage_client.upload_blob(
-                        self.config.storage_config['container'],
-                        os.path.basename(backup_file),
-                        f
-                    )
-            elif self.config.storage_type == 'gcs':
-                bucket = self.storage_client.bucket(self.config.storage_config['bucket'])
-                blob = bucket.blob(os.path.basename(backup_file))
-                blob.upload_from_filename(backup_file)
+            backups = []
+            for file in os.listdir(self.backup_dir):
+                if file.startswith('backup_') and (file.endswith('.json') or file.endswith('.csv')):
+                    file_path = os.path.join(self.backup_dir, file)
+                    backups.append({
+                        'filename': file,
+                        'path': file_path,
+                        'size': os.path.getsize(file_path),
+                        'created_at': datetime.fromtimestamp(os.path.getctime(file_path))
+                    })
             
+            return sorted(backups, key=lambda x: x['created_at'], reverse=True)
         except Exception as e:
-            print(f"Error uploading backup: {str(e)}")
+            self.logger.error(f'Failed to list backups: {str(e)}')
             raise
-
-    def _cleanup_old_backups(self) -> None:
-        """Clean up old backups."""
+    
+    def delete_backup(self, backup_file):
+        """Delete a backup file."""
         try:
-            # Get backup directory
-            backup_dir = self.config.backup_dir
-            
-            # Get all backup files
-            backup_files = []
-            for root, dirs, files in os.walk(backup_dir):
-                for file in files:
-                    if file.endswith('.tar.gz'):
-                        backup_files.append(os.path.join(root, file))
-            
-            # Sort by modification time
-            backup_files.sort(key=os.path.getmtime)
-            
-            # Remove old backups
-            while len(backup_files) > self.config.max_backups:
-                os.remove(backup_files.pop(0))
-            
+            file_path = os.path.join(self.backup_dir, backup_file)
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                self.logger.info(f'Backup deleted successfully: {backup_file}')
+            else:
+                raise FileNotFoundError(f'Backup file not found: {backup_file}')
         except Exception as e:
-            print(f"Error cleaning up old backups: {str(e)}")
+            self.logger.error(f'Failed to delete backup: {str(e)}')
             raise
-
-    def create_backup(self, files: List[str], backup_type: str = 'full') -> str:
-        """Create a new backup."""
+    
+    def _get_table_data(self, model):
+        """Get all data from a table."""
+        return [self._model_to_dict(record) for record in model.query.all()]
+    
+    def _model_to_dict(self, model):
+        """Convert a model instance to a dictionary."""
+        return {
+            column.name: getattr(model, column.name)
+            for column in model.__table__.columns
+        }
+    
+    def _save_json(self, data, file_path):
+        """Save data to a JSON file."""
+        with open(file_path, 'w') as f:
+            json.dump(data, f, default=str)
+    
+    def _save_csv(self, data, file_path):
+        """Save data to a CSV file."""
+        with open(file_path, 'w', newline='') as f:
+            writer = csv.writer(f)
+            
+            # Write header
+            writer.writerow(['table', 'data'])
+            
+            # Write data
+            for table, records in data.items():
+                for record in records:
+                    writer.writerow([table, json.dumps(record, default=str)])
+    
+    def _load_json(self, file_path):
+        """Load data from a JSON file."""
+        with open(file_path, 'r') as f:
+            return json.load(f)
+    
+    def _load_csv(self, file_path):
+        """Load data from a CSV file."""
+        data = {
+            'users': [],
+            'products': [],
+            'stores': [],
+            'transactions': [],
+            'weather': [],
+            'routes': [],
+            'forecasts': [],
+            'logs': []
+        }
+        
+        with open(file_path, 'r', newline='') as f:
+            reader = csv.reader(f)
+            next(reader)  # Skip header
+            
+            for row in reader:
+                table, record = row
+                data[table].append(json.loads(record))
+        
+        return data
+    
+    def _restore_table_data(self, model, data):
+        """Restore data to a table."""
+        # Clear existing data
+        model.query.delete()
+        
+        # Insert new data
+        for record in data:
+            instance = model()
+            for key, value in record.items():
+                setattr(instance, key, value)
+            db.session.add(instance)
+        
+        db.session.commit()
+    
+    def create_incremental_backup(self, last_backup_time):
+        """Create an incremental backup since the last backup."""
         try:
-            # Generate backup ID
-            backup_id = str(uuid.uuid4())
-            
-            # Create backup
-            backup = {
-                'id': backup_id,
-                'type': backup_type,
-                'files': files,
-                'timestamp': datetime.utcnow().isoformat()
-            }
-            
-            # Add to queue
-            self.backup_queue.put(backup)
-            
-            return backup_id
-            
+            with self.app.app_context():
+                # Generate timestamp
+                timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+                backup_file = f'{self.backup_dir}/incremental_backup_{timestamp}.json'
+                
+                # Get changed data
+                data = {
+                    'users': self._get_changed_data(User, last_backup_time),
+                    'products': self._get_changed_data(Product, last_backup_time),
+                    'stores': self._get_changed_data(Store, last_backup_time),
+                    'transactions': self._get_changed_data(Transaction, last_backup_time),
+                    'weather': self._get_changed_data(Weather, last_backup_time),
+                    'routes': self._get_changed_data(Route, last_backup_time),
+                    'forecasts': self._get_changed_data(Forecast, last_backup_time),
+                    'logs': self._get_changed_data(Log, last_backup_time)
+                }
+                
+                # Save data
+                self._save_json(data, backup_file)
+                
+                self.logger.info(f'Incremental backup created successfully: {backup_file}')
+                return backup_file
         except Exception as e:
-            print(f"Error creating backup: {str(e)}")
+            self.logger.error(f'Failed to create incremental backup: {str(e)}')
             raise
-
-    def restore_backup(self, backup_id: str, restore_dir: str) -> None:
-        """Restore a backup."""
+    
+    def _get_changed_data(self, model, since_time):
+        """Get data that has changed since the specified time."""
+        return [
+            self._model_to_dict(record)
+            for record in model.query.filter(
+                model.updated_at >= since_time
+            ).all()
+        ]
+    
+    def compress_backup(self, backup_file):
+        """Compress a backup file."""
         try:
-            # Find backup file
-            backup_file = None
-            for root, dirs, files in os.walk(self.config.backup_dir):
-                for file in files:
-                    if file.startswith(backup_id) and file.endswith('.tar.gz'):
-                        backup_file = os.path.join(root, file)
-                        break
-                if backup_file:
-                    break
+            file_path = os.path.join(self.backup_dir, backup_file)
+            if not os.path.exists(file_path):
+                raise FileNotFoundError(f'Backup file not found: {backup_file}')
             
-            if not backup_file:
-                raise FileNotFoundError(f"Backup {backup_id} not found")
+            # Create compressed file
+            compressed_file = f'{file_path}.gz'
+            with open(file_path, 'rb') as f_in:
+                with open(compressed_file, 'wb') as f_out:
+                    shutil.copyfileobj(f_in, f_out)
             
-            # Download from cloud storage if enabled
-            if self.config.enable_cloud:
-                self._download_backup(backup_file)
+            # Remove original file
+            os.remove(file_path)
             
-            # Extract backup
-            with tarfile.open(backup_file, 'r:gz') as tar:
-                tar.extractall(restore_dir)
-            
+            self.logger.info(f'Backup compressed successfully: {compressed_file}')
+            return compressed_file
         except Exception as e:
-            print(f"Error restoring backup: {str(e)}")
+            self.logger.error(f'Failed to compress backup: {str(e)}')
             raise
-
-    def _download_backup(self, backup_file: str) -> None:
-        """Download backup from cloud storage."""
+    
+    def decompress_backup(self, compressed_file):
+        """Decompress a backup file."""
         try:
-            if self.config.storage_type == 's3':
-                self.storage_client.download_file(
-                    self.config.storage_config['bucket'],
-                    os.path.basename(backup_file),
-                    backup_file
-                )
-            elif self.config.storage_type == 'azure':
-                with open(backup_file, 'wb') as f:
-                    self.storage_client.download_blob(
-                        self.config.storage_config['container'],
-                        os.path.basename(backup_file),
-                        f
-                    )
-            elif self.config.storage_type == 'gcs':
-                bucket = self.storage_client.bucket(self.config.storage_config['bucket'])
-                blob = bucket.blob(os.path.basename(backup_file))
-                blob.download_to_filename(backup_file)
+            file_path = os.path.join(self.backup_dir, compressed_file)
+            if not os.path.exists(file_path):
+                raise FileNotFoundError(f'Compressed file not found: {compressed_file}')
             
+            # Create decompressed file
+            decompressed_file = file_path[:-3]  # Remove .gz extension
+            with open(file_path, 'rb') as f_in:
+                with open(decompressed_file, 'wb') as f_out:
+                    shutil.copyfileobj(f_in, f_out)
+            
+            # Remove compressed file
+            os.remove(file_path)
+            
+            self.logger.info(f'Backup decompressed successfully: {decompressed_file}')
+            return decompressed_file
         except Exception as e:
-            print(f"Error downloading backup: {str(e)}")
-            raise
-
-    def get_backup_stats(self) -> Dict:
-        """Get backup statistics."""
-        try:
-            stats = {
-                'queue_size': self.backup_queue.qsize(),
-                'processing': self.processing,
-                'backup_count': len(self._get_backup_files()),
-                'storage_used': self._get_storage_used(),
-                'last_backup': self._get_last_backup_time()
-            }
-            
-            return stats
-            
-        except Exception as e:
-            print(f"Error getting backup stats: {str(e)}")
-            raise
-
-    def _get_backup_files(self) -> List[str]:
-        """Get list of backup files."""
-        try:
-            backup_files = []
-            for root, dirs, files in os.walk(self.config.backup_dir):
-                for file in files:
-                    if file.endswith('.tar.gz'):
-                        backup_files.append(os.path.join(root, file))
-            return backup_files
-            
-        except Exception as e:
-            print(f"Error getting backup files: {str(e)}")
-            raise
-
-    def _get_storage_used(self) -> int:
-        """Get total storage used by backups."""
-        try:
-            total_size = 0
-            for backup_file in self._get_backup_files():
-                total_size += os.path.getsize(backup_file)
-            return total_size
-            
-        except Exception as e:
-            print(f"Error getting storage used: {str(e)}")
-            raise
-
-    def _get_last_backup_time(self) -> Optional[str]:
-        """Get timestamp of last backup."""
-        try:
-            backup_files = self._get_backup_files()
-            if not backup_files:
-                return None
-            
-            # Sort by modification time
-            backup_files.sort(key=os.path.getmtime)
-            
-            # Get last backup time
-            return datetime.fromtimestamp(os.path.getmtime(backup_files[-1])).isoformat()
-            
-        except Exception as e:
-            print(f"Error getting last backup time: {str(e)}")
-            raise
-
-    def clear_backups(self) -> None:
-        """Clear all backups."""
-        try:
-            # Clear queue
-            while not self.backup_queue.empty():
-                self.backup_queue.get()
-                self.backup_queue.task_done()
-            
-            # Remove backup files
-            for backup_file in self._get_backup_files():
-                os.remove(backup_file)
-            
-        except Exception as e:
-            print(f"Error clearing backups: {str(e)}")
+            self.logger.error(f'Failed to decompress backup: {str(e)}')
             raise
 
 # Example usage
@@ -444,16 +371,16 @@ if __name__ == "__main__":
     
     # Create backup
     backup_id = backup.create_backup(
-        files=['data/sales.csv', 'data/inventory.csv'],
-        backup_type='full'
+        format='json'
     )
     
     # Get backup stats
-    stats = backup.get_backup_stats()
+    stats = backup.list_backups()
     print(f"Backup stats: {stats}")
     
     # Restore backup
-    backup.restore_backup(backup_id, 'restore')
+    backup.restore_backup(backup_id)
     
     # Clear backups
-    backup.clear_backups() 
+    for backup_file in backup.list_backups():
+        backup.delete_backup(backup_file['filename']) 

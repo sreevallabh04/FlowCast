@@ -7,6 +7,9 @@ import {
   Box,
   CircularProgress,
   Alert,
+  Paper,
+  useTheme,
+  useMediaQuery
 } from '@mui/material';
 import {
   TrendingUp as TrendingUpIcon,
@@ -23,10 +26,13 @@ import {
   Tooltip,
   Legend,
   ResponsiveContainer,
+  BarChart,
+  Bar
 } from 'recharts';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchDashboardData } from '../store/dashboardSlice';
 import { formatCurrency, formatNumber } from '../utils/formatters';
+import axios from 'axios';
 
 const KpiCard = ({ title, value, icon, color, loading, error }) => {
   return (
@@ -98,10 +104,19 @@ const ChartCard = ({ title, data, loading, error }) => {
   );
 };
 
-function Dashboard() {
+const Dashboard = () => {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const dispatch = useDispatch();
   const { data, loading, error } = useSelector((state) => state.dashboard);
   const [alerts, setAlerts] = useState([]);
+  const [loadingData, setLoadingData] = useState(true);
+  const [errorData, setErrorData] = useState(null);
+  const [dataLocal, setDataLocal] = useState({
+    demandMetrics: null,
+    inventoryMetrics: null,
+    routeMetrics: null
+  });
 
   useEffect(() => {
     // Initial data fetch
@@ -148,8 +163,52 @@ function Dashboard() {
     }
   }, [data]);
 
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const response = await axios.get('/api/analytics', {
+          params: {
+            product_id: 'PROD001', // Example product ID
+            store_id: 'STORE001', // Example store ID
+            start_date: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+            end_date: new Date().toISOString().split('T')[0]
+          }
+        });
+        setDataLocal(response.data);
+        setLoadingData(false);
+      } catch (err) {
+        setErrorData(err.message);
+        setLoadingData(false);
+      }
+    };
+
+    fetchData();
+  }, []);
+
+  if (loadingData) {
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="80vh">
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (errorData) {
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="80vh">
+        <Typography color="error">{errorData}</Typography>
+      </Box>
+    );
+  }
+
+  const { demandMetrics, inventoryMetrics, routeMetrics } = dataLocal;
+
   return (
-    <Box>
+    <Box p={3}>
+      <Typography variant="h4" gutterBottom>
+        Dashboard
+      </Typography>
+
       {/* Alerts */}
       {alerts.map((alert, index) => (
         <Alert
@@ -160,89 +219,189 @@ function Dashboard() {
         >
           {alert.message}
         </Alert>
-      ))}
+      )}
 
       {/* KPI Cards */}
-      <Grid container spacing={3} sx={{ mb: 3 }}>
+      <Grid container spacing={3} sx={{ mb: 4 }}>
         <Grid item xs={12} sm={6} md={3}>
-          <KpiCard
-            title="Total Revenue"
-            value={formatCurrency(data?.revenue_metrics?.total_revenue)}
-            icon={<TrendingUpIcon sx={{ color: '#4caf50' }} />}
-            color="#4caf50"
-            loading={loading}
-            error={error}
-          />
+          <Paper
+            sx={{
+              p: 2,
+              display: 'flex',
+              flexDirection: 'column',
+              height: 140,
+              bgcolor: theme.palette.primary.main,
+              color: 'white'
+            }}
+          >
+            <Typography component="h2" variant="h6" gutterBottom>
+              Total Demand
+            </Typography>
+            <Typography component="p" variant="h4">
+              {demandMetrics?.total_demand || 0}
+            </Typography>
+          </Paper>
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
-          <KpiCard
-            title="Inventory Value"
-            value={formatCurrency(data?.inventory_metrics?.total_value)}
-            icon={<InventoryIcon sx={{ color: '#2196f3' }} />}
-            color="#2196f3"
-            loading={loading}
-            error={error}
-          />
+          <Paper
+            sx={{
+              p: 2,
+              display: 'flex',
+              flexDirection: 'column',
+              height: 140,
+              bgcolor: theme.palette.secondary.main,
+              color: 'white'
+            }}
+          >
+            <Typography component="h2" variant="h6" gutterBottom>
+              Current Stock
+            </Typography>
+            <Typography component="p" variant="h4">
+              {inventoryMetrics?.current_stock || 0}
+            </Typography>
+          </Paper>
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
-          <KpiCard
-            title="Active Deliveries"
-            value={formatNumber(data?.routing_metrics?.active_deliveries)}
-            icon={<LocalShippingIcon sx={{ color: '#ff9800' }} />}
-            color="#ff9800"
-            loading={loading}
-            error={error}
-          />
+          <Paper
+            sx={{
+              p: 2,
+              display: 'flex',
+              flexDirection: 'column',
+              height: 140,
+              bgcolor: theme.palette.success.main,
+              color: 'white'
+            }}
+          >
+            <Typography component="h2" variant="h6" gutterBottom>
+              Service Level
+            </Typography>
+            <Typography component="p" variant="h4">
+              {inventoryMetrics?.service_level || 0}%
+            </Typography>
+          </Paper>
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
-          <KpiCard
-            title="Waste Reduction"
-            value={`${data?.expiry_metrics?.waste_reduction}%`}
-            icon={<WarningIcon sx={{ color: '#f44336' }} />}
-            color="#f44336"
-            loading={loading}
-            error={error}
-          />
+          <Paper
+            sx={{
+              p: 2,
+              display: 'flex',
+              flexDirection: 'column',
+              height: 140,
+              bgcolor: theme.palette.warning.main,
+              color: 'white'
+            }}
+          >
+            <Typography component="h2" variant="h6" gutterBottom>
+              Total Distance
+            </Typography>
+            <Typography component="p" variant="h4">
+              {routeMetrics?.total_distance || 0} km
+            </Typography>
+          </Paper>
         </Grid>
       </Grid>
 
       {/* Charts */}
       <Grid container spacing={3}>
+        {/* Demand Forecast Chart */}
         <Grid item xs={12} md={6}>
-          <ChartCard
-            title="Demand Forecast"
-            data={data?.demand_metrics?.forecast_data}
-            loading={loading}
-            error={error}
-          />
+          <Paper sx={{ p: 2 }}>
+            <Typography variant="h6" gutterBottom>
+              Demand Forecast
+            </Typography>
+            <ResponsiveContainer width="100%" height={300}>
+              <LineChart
+                data={demandMetrics?.forecast_data || []}
+                margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="date" />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Line
+                  type="monotone"
+                  dataKey="predicted"
+                  stroke={theme.palette.primary.main}
+                  name="Predicted Demand"
+                />
+                <Line
+                  type="monotone"
+                  dataKey="actual"
+                  stroke={theme.palette.secondary.main}
+                  name="Actual Demand"
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </Paper>
         </Grid>
+
+        {/* Inventory Levels Chart */}
         <Grid item xs={12} md={6}>
-          <ChartCard
-            title="Inventory Levels"
-            data={data?.inventory_metrics?.inventory_data}
-            loading={loading}
-            error={error}
-          />
+          <Paper sx={{ p: 2 }}>
+            <Typography variant="h6" gutterBottom>
+              Inventory Levels
+            </Typography>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart
+                data={inventoryMetrics?.inventory_data || []}
+                margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="product" />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Bar
+                  dataKey="current"
+                  fill={theme.palette.primary.main}
+                  name="Current Stock"
+                />
+                <Bar
+                  dataKey="safety"
+                  fill={theme.palette.warning.main}
+                  name="Safety Stock"
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          </Paper>
         </Grid>
-        <Grid item xs={12} md={6}>
-          <ChartCard
-            title="Delivery Performance"
-            data={data?.routing_metrics?.performance_data}
-            loading={loading}
-            error={error}
-          />
-        </Grid>
-        <Grid item xs={12} md={6}>
-          <ChartCard
-            title="Waste Reduction"
-            data={data?.expiry_metrics?.waste_data}
-            loading={loading}
-            error={error}
-          />
+
+        {/* Route Efficiency Chart */}
+        <Grid item xs={12}>
+          <Paper sx={{ p: 2 }}>
+            <Typography variant="h6" gutterBottom>
+              Route Efficiency
+            </Typography>
+            <ResponsiveContainer width="100%" height={300}>
+              <LineChart
+                data={routeMetrics?.route_data || []}
+                margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="date" />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Line
+                  type="monotone"
+                  dataKey="distance"
+                  stroke={theme.palette.primary.main}
+                  name="Distance (km)"
+                />
+                <Line
+                  type="monotone"
+                  dataKey="duration"
+                  stroke={theme.palette.secondary.main}
+                  name="Duration (min)"
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </Paper>
         </Grid>
       </Grid>
     </Box>
   );
-}
+};
 
 export default Dashboard; 

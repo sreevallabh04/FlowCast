@@ -1,136 +1,113 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import { ThemeProvider, createTheme } from '@mui/material/styles';
-import CssBaseline from '@mui/material/CssBaseline';
-import { useSelector } from 'react-redux';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { ThemeProvider, CssBaseline } from '@mui/material';
+import { Provider } from 'react-redux';
+import { PersistGate } from 'redux-persist/integration/react';
+import { store, persistor } from './redux/store';
+import theme from './theme';
 
 // Components
-import Layout from './components/Layout';
-import Dashboard from './components/Dashboard';
-import DemandForecast from './components/DemandForecast';
-import InventoryOptimization from './components/InventoryOptimization';
-import RouteOptimization from './components/RouteOptimization';
-import Analytics from './components/Analytics';
+import Navigation from './components/layout/Navigation';
+import Dashboard from './components/dashboard/Dashboard';
+import Inventory from './components/inventory/Inventory';
+import Routes from './components/routes/Routes';
+import Analytics from './components/analytics/Analytics';
+import Settings from './components/settings/Settings';
+import Login from './components/auth/Login';
+import Register from './components/auth/Register';
+import PrivateRoute from './components/auth/PrivateRoute';
 
-// Theme configuration
-const lightTheme = createTheme({
-  palette: {
-    mode: 'light',
-    primary: {
-      main: '#1976d2',
-    },
-    secondary: {
-      main: '#dc004e',
-    },
-    background: {
-      default: '#f5f5f5',
-      paper: '#ffffff',
-    },
-  },
-  typography: {
-    fontFamily: '"Roboto", "Helvetica", "Arial", sans-serif',
-    h1: {
-      fontSize: '2.5rem',
-      fontWeight: 500,
-    },
-    h2: {
-      fontSize: '2rem',
-      fontWeight: 500,
-    },
-    h3: {
-      fontSize: '1.75rem',
-      fontWeight: 500,
-    },
-  },
-  components: {
-    MuiButton: {
-      styleOverrides: {
-        root: {
-          textTransform: 'none',
-          borderRadius: 8,
-        },
-      },
-    },
-    MuiCard: {
-      styleOverrides: {
-        root: {
-          borderRadius: 12,
-          boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
-        },
-      },
-    },
-  },
-});
+// Layout wrapper for authenticated routes
+const AuthenticatedLayout = ({ children }) => (
+  <>
+    <Navigation />
+    <Box
+      component="main"
+      sx={{
+        flexGrow: 1,
+        p: 3,
+        mt: '64px',
+        backgroundColor: 'background.default',
+        minHeight: 'calc(100vh - 64px)'
+      }}
+    >
+      {children}
+    </Box>
+  </>
+);
 
-const darkTheme = createTheme({
-  palette: {
-    mode: 'dark',
-    primary: {
-      main: '#90caf9',
-    },
-    secondary: {
-      main: '#f48fb1',
-    },
-    background: {
-      default: '#121212',
-      paper: '#1e1e1e',
-    },
-  },
-  typography: {
-    fontFamily: '"Roboto", "Helvetica", "Arial", sans-serif',
-    h1: {
-      fontSize: '2.5rem',
-      fontWeight: 500,
-    },
-    h2: {
-      fontSize: '2rem',
-      fontWeight: 500,
-    },
-    h3: {
-      fontSize: '1.75rem',
-      fontWeight: 500,
-    },
-  },
-  components: {
-    MuiButton: {
-      styleOverrides: {
-        root: {
-          textTransform: 'none',
-          borderRadius: 8,
-        },
-      },
-    },
-    MuiCard: {
-      styleOverrides: {
-        root: {
-          borderRadius: 12,
-          boxShadow: '0 4px 6px rgba(0, 0, 0, 0.2)',
-        },
-      },
-    },
-  },
-});
-
-function App() {
-  const darkMode = useSelector((state) => state.app.darkMode);
-  const theme = darkMode ? darkTheme : lightTheme;
-
+const App = () => {
   return (
-    <ThemeProvider theme={theme}>
-      <CssBaseline />
-      <Router>
-        <Layout>
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/demand" element={<DemandForecast />} />
-            <Route path="/inventory" element={<InventoryOptimization />} />
-            <Route path="/routes" element={<RouteOptimization />} />
-            <Route path="/analytics" element={<Analytics />} />
-          </Routes>
-        </Layout>
-      </Router>
-    </ThemeProvider>
+    <Provider store={store}>
+      <PersistGate loading={null} persistor={persistor}>
+        <ThemeProvider theme={theme}>
+          <CssBaseline />
+          <Router>
+            <Routes>
+              {/* Public Routes */}
+              <Route path="/login" element={<Login />} />
+              <Route path="/register" element={<Register />} />
+
+              {/* Protected Routes */}
+              <Route
+                path="/"
+                element={
+                  <PrivateRoute>
+                    <AuthenticatedLayout>
+                      <Dashboard />
+                    </AuthenticatedLayout>
+                  </PrivateRoute>
+                }
+              />
+              <Route
+                path="/inventory"
+                element={
+                  <PrivateRoute>
+                    <AuthenticatedLayout>
+                      <Inventory />
+                    </AuthenticatedLayout>
+                  </PrivateRoute>
+                }
+              />
+              <Route
+                path="/routes"
+                element={
+                  <PrivateRoute>
+                    <AuthenticatedLayout>
+                      <Routes />
+                    </AuthenticatedLayout>
+                  </PrivateRoute>
+                }
+              />
+              <Route
+                path="/analytics"
+                element={
+                  <PrivateRoute>
+                    <AuthenticatedLayout>
+                      <Analytics />
+                    </AuthenticatedLayout>
+                  </PrivateRoute>
+                }
+              />
+              <Route
+                path="/settings"
+                element={
+                  <PrivateRoute>
+                    <AuthenticatedLayout>
+                      <Settings />
+                    </AuthenticatedLayout>
+                  </PrivateRoute>
+                }
+              />
+
+              {/* Fallback Route */}
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </Router>
+        </ThemeProvider>
+      </PersistGate>
+    </Provider>
   );
-}
+};
 
 export default App; 

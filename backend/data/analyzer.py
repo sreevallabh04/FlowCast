@@ -16,6 +16,9 @@ from sklearn.preprocessing import StandardScaler
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from sklearn.linear_model import LinearRegression
+from sklearn.ensemble import RandomForestRegressor
+from models import Transaction, Product, Store, Weather, Route
 
 warnings.filterwarnings('ignore')
 
@@ -52,6 +55,8 @@ class DataAnalyzer:
         # Set up plotting style
         plt.style.use('seaborn')
         sns.set_palette("husl")
+        
+        self.scaler = StandardScaler()
 
     def load_data(self) -> None:
         """Load processed data from CSV files."""
@@ -525,6 +530,246 @@ class DataAnalyzer:
         }
         
         return summary
+
+    def analyze_sales_trends(self, date_range='30d', category='all', store='all'):
+        """Analyze sales trends over time."""
+        transactions = Transaction.get_sales_analytics(date_range, category, store)
+        
+        if not transactions:
+            return None
+        
+        # Convert to DataFrame
+        df = pd.DataFrame([{
+            'date': t.timestamp.date(),
+            'sales': t.price * t.quantity
+        } for t in transactions])
+        
+        # Group by date and calculate daily sales
+        daily_sales = df.groupby('date')['sales'].sum().reset_index()
+        
+        # Calculate moving averages
+        daily_sales['ma7'] = daily_sales['sales'].rolling(window=7).mean()
+        daily_sales['ma30'] = daily_sales['sales'].rolling(window=30).mean()
+        
+        return daily_sales.to_dict('records')
+    
+    def analyze_inventory_trends(self, category='all', store='all'):
+        """Analyze inventory trends."""
+        products = Product.get_inventory_analytics(category, store)
+        
+        if not products:
+            return None
+        
+        # Convert to DataFrame
+        df = pd.DataFrame([{
+            'product': p.name,
+            'quantity': p.quantity,
+            'value': p.value
+        } for p in products])
+        
+        # Calculate inventory metrics
+        total_value = df['value'].sum()
+        avg_quantity = df['quantity'].mean()
+        low_stock = df[df['quantity'] <= df['reorder_point']].shape[0]
+        
+        return {
+            'total_value': total_value,
+            'avg_quantity': avg_quantity,
+            'low_stock_count': low_stock,
+            'products': df.to_dict('records')
+        }
+    
+    def analyze_delivery_performance(self, date_range='30d'):
+        """Analyze delivery performance metrics."""
+        routes = Route.get_delivery_analytics(date_range)
+        
+        if not routes:
+            return None
+        
+        # Convert to DataFrame
+        df = pd.DataFrame([{
+            'status': r.status,
+            'count': r.count
+        } for r in routes])
+        
+        # Calculate delivery metrics
+        total_deliveries = df['count'].sum()
+        success_rate = df[df['status'] == 'completed']['count'].sum() / total_deliveries * 100
+        
+        return {
+            'total_deliveries': total_deliveries,
+            'success_rate': success_rate,
+            'status_breakdown': df.to_dict('records')
+        }
+    
+    def analyze_weather_impact(self, date_range='30d'):
+        """Analyze the impact of weather on sales and deliveries."""
+        # Get weather data
+        weather_data = Weather.query.filter(
+            Weather.timestamp >= datetime.utcnow() - timedelta(days=int(date_range[:-1]))
+        ).all()
+        
+        if not weather_data:
+            return None
+        
+        # Convert to DataFrame
+        df = pd.DataFrame([{
+            'date': w.timestamp.date(),
+            'temperature': w.temperature,
+            'condition': w.condition
+        } for w in weather_data])
+        
+        # Get sales data for the same period
+        sales_data = Transaction.get_sales_analytics(date_range)
+        
+        if not sales_data:
+            return None
+        
+        # Convert sales to DataFrame
+        sales_df = pd.DataFrame([{
+            'date': t.timestamp.date(),
+            'sales': t.price * t.quantity
+        } for t in sales_data])
+        
+        # Merge weather and sales data
+        merged_df = pd.merge(df, sales_df, on='date', how='left')
+        
+        # Calculate correlation between weather and sales
+        correlation = merged_df['temperature'].corr(merged_df['sales'])
+        
+        return {
+            'correlation': correlation,
+            'weather_impact': merged_df.to_dict('records')
+        }
+    
+    def generate_forecast(self, product_id, period=30, confidence=95):
+        """Generate sales forecast for a product."""
+        # Get historical sales data
+        sales_data = Transaction.query.filter_by(product_id=product_id).all()
+        
+        if not sales_data:
+            return None
+        
+        # Convert to DataFrame
+        df = pd.DataFrame([{
+            'date': t.timestamp.date(),
+            'sales': t.price * t.quantity
+        } for t in sales_data])
+        
+        # Prepare features
+        df['day_of_week'] = df['date'].dt.dayofweek
+        df['month'] = df['date'].dt.month
+        df['year'] = df['date'].dt.year
+        
+        # Split features and target
+        X = df[['day_of_week', 'month', 'year']]
+        y = df['sales']
+        
+        # Scale features
+        X_scaled = self.scaler.fit_transform(X)
+        
+        # Train model
+        model = RandomForestRegressor(n_estimators=100, random_state=42)
+        model.fit(X_scaled, y)
+        
+        # Generate future dates
+        future_dates = pd.date_range(
+            start=datetime.utcnow(),
+            periods=period,
+            freq='D'
+        )
+        
+        # Prepare future features
+        future_df = pd.DataFrame({
+            'date': future_dates,
+            'day_of_week': future_dates.dayofweek,
+            'month': future_dates.month,
+            'year': future_dates.year
+        })
+        
+        # Scale future features
+        future_X_scaled = self.scaler.transform(future_df[['day_of_week', 'month', 'year']])
+        
+        # Make predictions
+        predictions = model.predict(future_X_scaled)
+        
+        # Calculate confidence intervals
+        std_dev = np.std(predictions)
+        z_score = 1.96  # 95% confidence interval
+        upper_bound = predictions + (z_score * std_dev)
+        lower_bound = predictions - (z_score * std_dev)
+        
+        return {
+            'forecasts': [
+                {
+                    'date': date.isoformat(),
+                    'forecast': float(pred),
+                    'confidence_upper': float(upper),
+                    'confidence_lower': float(lower)
+                }
+                for date, pred, upper, lower in zip(
+                    future_dates,
+                    predictions,
+                    upper_bound,
+                    lower_bound
+                )
+            ]
+        }
+    
+    def analyze_seasonal_patterns(self, date_range='365d'):
+        """Analyze seasonal patterns in sales and inventory."""
+        # Get sales data
+        sales_data = Transaction.get_sales_analytics(date_range)
+        
+        if not sales_data:
+            return None
+        
+        # Convert to DataFrame
+        df = pd.DataFrame([{
+            'date': t.timestamp.date(),
+            'sales': t.price * t.quantity,
+            'month': t.timestamp.month,
+            'day_of_week': t.timestamp.weekday()
+        } for t in sales_data])
+        
+        # Calculate monthly averages
+        monthly_avg = df.groupby('month')['sales'].mean()
+        
+        # Calculate day of week averages
+        daily_avg = df.groupby('day_of_week')['sales'].mean()
+        
+        return {
+            'monthly_patterns': monthly_avg.to_dict(),
+            'daily_patterns': daily_avg.to_dict()
+        }
+    
+    def analyze_product_correlations(self, date_range='30d'):
+        """Analyze correlations between product sales."""
+        # Get sales data
+        sales_data = Transaction.get_sales_analytics(date_range)
+        
+        if not sales_data:
+            return None
+        
+        # Convert to DataFrame
+        df = pd.DataFrame([{
+            'date': t.timestamp.date(),
+            'product_id': t.product_id,
+            'sales': t.price * t.quantity
+        } for t in sales_data])
+        
+        # Pivot data to get daily sales by product
+        pivot_df = df.pivot_table(
+            index='date',
+            columns='product_id',
+            values='sales',
+            fill_value=0
+        )
+        
+        # Calculate correlation matrix
+        correlation_matrix = pivot_df.corr()
+        
+        return correlation_matrix.to_dict()
 
 # Example usage
 if __name__ == "__main__":

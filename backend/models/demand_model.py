@@ -16,52 +16,68 @@ import json
 logger = logging.getLogger(__name__)
 
 class DemandModel:
-    def __init__(self, model_path: str = 'models/saved/demand_model.joblib'):
+    def __init__(self, n_estimators=100, random_state=42):
         self.model = RandomForestRegressor(
-            n_estimators=100,
-            max_depth=10,
-            min_samples_split=5,
-            min_samples_leaf=2,
-            random_state=42
+            n_estimators=n_estimators,
+            random_state=random_state,
+            n_jobs=-1
         )
         self.scaler = StandardScaler()
-        self.model_path = model_path
+        self.model_path = 'models/saved/demand_model.joblib'
         self.version = "1.0.0"
         self.last_trained = None
         self.feature_importance = {}
         self.metrics = {}
+        self.feature_columns = None
         
         # Load model if exists
-        if os.path.exists(model_path):
+        if os.path.exists(self.model_path):
             self.load_model()
         else:
             self.train()  # Train new model if none exists
 
-    def preprocess_data(self, data: pd.DataFrame) -> tuple:
-        """Preprocess the input data for training or prediction."""
-        # Convert dates to features
-        data['year'] = data['date'].dt.year
-        data['month'] = data['date'].dt.month
-        data['day'] = data['date'].dt.day
-        data['dayofweek'] = data['date'].dt.dayofweek
-        data['is_weekend'] = data['dayofweek'].isin([5, 6]).astype(int)
+    def prepare_features(self, data):
+        """Prepare features for the model."""
+        # Convert dates to cyclical features
+        data['day_of_week'] = pd.to_datetime(data['date']).dt.dayofweek
+        data['month'] = pd.to_datetime(data['date']).dt.month
+        data['day_of_year'] = pd.to_datetime(data['date']).dt.dayofyear
         
-        # Create lag features
+        # Create cyclical features
+        data['day_sin'] = np.sin(2 * np.pi * data['day_of_week']/7)
+        data['day_cos'] = np.cos(2 * np.pi * data['day_of_week']/7)
+        data['month_sin'] = np.sin(2 * np.pi * data['month']/12)
+        data['month_cos'] = np.cos(2 * np.pi * data['month']/12)
+        
+        # Add weather features
+        data['temp_squared'] = data['temperature'] ** 2
+        data['precip_squared'] = data['precipitation'] ** 2
+        
+        # Add economic features
+        data['price_elasticity'] = data['price'] * data['gdp_growth']
+        
+        # Add event features
+        data['is_holiday'] = data['is_holiday'].astype(int)
+        data['is_event'] = data['is_event'].astype(int)
+        
+        # Add lag features
         for lag in [1, 7, 14, 30]:
             data[f'sales_lag_{lag}'] = data.groupby('product_id')['sales'].shift(lag)
         
-        # Create rolling mean features
+        # Add rolling features
         for window in [7, 14, 30]:
             data[f'sales_rolling_mean_{window}'] = data.groupby('product_id')['sales'].transform(
                 lambda x: x.rolling(window=window, min_periods=1).mean()
             )
+            data[f'sales_rolling_std_{window}'] = data.groupby('product_id')['sales'].transform(
+                lambda x: x.rolling(window=window, min_periods=1).std()
+            )
         
-        # Handle categorical variables
-        categorical_cols = ['product_id', 'location_id', 'weather_condition', 'event_type']
-        data = pd.get_dummies(data, columns=categorical_cols, drop_first=True)
+        # Drop original date columns
+        data = data.drop(['date', 'day_of_week', 'month', 'day_of_year'], axis=1)
         
-        # Fill missing values
-        data = data.fillna(method='ffill').fillna(0)
+        # Store feature columns
+        self.feature_columns = [col for col in data.columns if col not in ['sales', 'product_id', 'store_id']]
         
         return data
 
@@ -115,11 +131,10 @@ class DemandModel:
             data = self.generate_training_data()
             
             # Preprocess data
-            processed_data = self.preprocess_data(data)
+            processed_data = self.prepare_features(data)
             
             # Prepare features and target
-            feature_cols = [col for col in processed_data.columns if col not in ['date', 'sales']]
-            X = processed_data[feature_cols]
+            X = processed_data[self.feature_columns]
             y = processed_data['sales']
             
             # Split data
@@ -141,7 +156,7 @@ class DemandModel:
             }
             
             # Calculate feature importance
-            self.feature_importance = dict(zip(feature_cols, self.model.feature_importances_))
+            self.feature_importance = dict(zip(self.feature_columns, self.model.feature_importances_))
             
             # Save model
             self.save_model()
@@ -154,61 +169,39 @@ class DemandModel:
             logging.error(f"Error training model: {str(e)}")
             raise
 
-    def predict(self, product_id: str, location_id: str, 
-                start_date: datetime, end_date: datetime) -> Dict:
-        """Generate demand predictions for a specific product and location."""
+    def predict(self, data, return_confidence=True):
+        """Make predictions with confidence intervals."""
         try:
-            # Generate prediction dates
-            dates = pd.date_range(start=start_date, end=end_date, freq='D')
-            
-            # Create prediction data
-            pred_data = []
-            for date in dates:
-                pred_data.append({
-                    'date': date,
-                    'product_id': product_id,
-                    'location_id': location_id,
-                    'price': np.random.uniform(10, 100),  # This should come from actual data
-                    'weather_condition': np.random.choice(['sunny', 'rainy', 'cloudy', 'snowy']),
-                    'temperature': np.random.normal(20, 10),
-                    'event_type': np.random.choice(['none', 'holiday', 'promotion', 'sport'], p=[0.7, 0.1, 0.1, 0.1])
-                })
-            
-            # Convert to DataFrame and preprocess
-            pred_df = pd.DataFrame(pred_data)
-            processed_data = self.preprocess_data(pred_df)
-            
             # Prepare features
-            feature_cols = [col for col in processed_data.columns if col not in ['date', 'sales']]
-            X = processed_data[feature_cols]
+            processed_data = self.prepare_features(data)
             
-            # Scale features
-            X_scaled = self.scaler.transform(X)
+            # Make predictions
+            predictions = self.model.predict(processed_data[self.feature_columns])
             
-            # Generate predictions
-            predictions = self.model.predict(X_scaled)
-            
-            # Format results
-            results = {
-                'predictions': [
-                    {
-                        'date': date.isoformat(),
-                        'predicted_demand': int(max(0, pred)),
-                        'confidence': self.get_confidence_score()
+            if return_confidence:
+                # Get predictions from each tree
+                predictions_all = np.array([tree.predict(processed_data[self.feature_columns]) 
+                                          for tree in self.model.estimators_])
+                
+                # Calculate confidence intervals
+                mean_pred = np.mean(predictions_all, axis=0)
+                std_pred = np.std(predictions_all, axis=0)
+                
+                lower_bound = mean_pred - 1.96 * std_pred
+                upper_bound = mean_pred + 1.96 * std_pred
+                
+                return {
+                    'predictions': predictions.tolist(),
+                    'confidence_intervals': {
+                        'lower': lower_bound.tolist(),
+                        'upper': upper_bound.tolist()
                     }
-                    for date, pred in zip(dates, predictions)
-                ],
-                'metadata': {
-                    'model_version': self.version,
-                    'last_trained': self.last_trained.isoformat() if self.last_trained else None,
-                    'metrics': self.metrics
                 }
-            }
             
-            return results
+            return {'predictions': predictions.tolist()}
             
         except Exception as e:
-            logging.error(f"Error generating predictions: {str(e)}")
+            logging.error(f"Error making predictions: {str(e)}")
             raise
 
     def get_metrics(self, start_date: datetime, end_date: datetime,
@@ -263,6 +256,14 @@ class DemandModel:
         """Get the model's accuracy score."""
         return self.metrics.get('r2', 0)
 
+    def get_feature_importance(self):
+        """Get feature importance scores."""
+        if not self.model or not self.feature_columns:
+            raise ValueError("Model not trained yet")
+        
+        importance = dict(zip(self.feature_columns, self.model.feature_importances_))
+        return dict(sorted(importance.items(), key=lambda x: x[1], reverse=True))
+
 # Example usage
 if __name__ == "__main__":
     # Create and train model
@@ -287,7 +288,7 @@ if __name__ == "__main__":
     })
     
     # Make predictions
-    predictions = model.predict(test_features['product_id'], test_features['store_id'])
+    predictions = model.predict(test_features)
     
     print(f"Predictions: {predictions}")
     print(f"Model metrics: {metrics}") 

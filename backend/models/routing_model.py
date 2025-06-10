@@ -1,127 +1,165 @@
 import numpy as np
 import pandas as pd
+from typing import Dict, List, Optional, Tuple
+from datetime import datetime, timedelta
+import logging
+import googlemaps
 from ortools.constraint_solver import routing_enums_pb2
 from ortools.constraint_solver import pywrapcp
-import googlemaps
-import logging
-from datetime import datetime, timedelta
-from utils.config import Config
+import polyline
+import os
 
-logger = logging.getLogger(__name__)
+class RoutingModel:
+    def __init__(self, google_maps_api_key: Optional[str] = None):
+        """
+        Initialize the routing optimization model.
+        
+        Args:
+            google_maps_api_key: Optional Google Maps API key for real routing
+        """
+        self.logger = logging.getLogger(__name__)
+        self.version = "1.0.0"
+        
+        # Initialize Google Maps client if API key is provided
+        self.gmaps = None
+        if google_maps_api_key:
+            try:
+                self.gmaps = googlemaps.Client(key=google_maps_api_key)
+            except Exception as e:
+                self.logger.error(f"Error initializing Google Maps client: {str(e)}")
+                self.gmaps = None
 
-class RouteOptimizer:
-    def __init__(self):
-        self.gmaps = googlemaps.Client(key=Config.GOOGLE_MAPS_API_KEY)
-    
-    def _get_distance_matrix(self, locations):
-        """Get distance matrix from Google Maps API."""
+    def create_distance_matrix(self,
+                             locations: List[Dict[str, float]],
+                             mode: str = 'driving') -> Tuple[np.ndarray, Dict]:
+        """
+        Create distance matrix using Google Maps API or fallback to Euclidean distance.
+        
+        Args:
+            locations: List of locations with lat/lng coordinates
+            mode: Travel mode (driving, walking, bicycling, transit)
+        """
         try:
-            # Format locations for Google Maps API
-            origins = [f"{loc['lat']},{loc['lng']}" for loc in locations]
-            destinations = origins.copy()
+            n = len(locations)
+            distance_matrix = np.zeros((n, n))
+            duration_matrix = np.zeros((n, n))
             
-            # Get distance matrix
-            matrix = self.gmaps.distance_matrix(
-                origins=origins,
-                destinations=destinations,
-                mode="driving",
-                departure_time=datetime.now()
-            )
+            if self.gmaps:
+                # Use Google Maps API
+                origins = [f"{loc['lat']},{loc['lng']}" for loc in locations]
+                destinations = origins
+                
+                # Get distance matrix from Google Maps
+                result = self.gmaps.distance_matrix(
+                    origins=origins,
+                    destinations=destinations,
+                    mode=mode,
+                    departure_time=datetime.now()
+                )
+                
+                # Parse results
+                for i in range(n):
+                    for j in range(n):
+                        if i != j:
+                            element = result['rows'][i]['elements'][j]
+                            if element['status'] == 'OK':
+                                distance_matrix[i, j] = element['distance']['value']  # meters
+                                duration_matrix[i, j] = element['duration']['value']  # seconds
+                            else:
+                                # Fallback to Euclidean distance
+                                distance_matrix[i, j] = self._calculate_euclidean_distance(
+                                    locations[i], locations[j]
+                                )
+                                duration_matrix[i, j] = distance_matrix[i, j] / 13.89  # Assuming 50 km/h
+                        else:
+                            distance_matrix[i, j] = 0
+                            duration_matrix[i, j] = 0
+            else:
+                # Use Euclidean distance as fallback
+                for i in range(n):
+                    for j in range(n):
+                        if i != j:
+                            distance_matrix[i, j] = self._calculate_euclidean_distance(
+                                locations[i], locations[j]
+                            )
+                            duration_matrix[i, j] = distance_matrix[i, j] / 13.89  # Assuming 50 km/h
+                        else:
+                            distance_matrix[i, j] = 0
+                            duration_matrix[i, j] = 0
             
-            # Extract distances and durations
-            distances = []
-            durations = []
+            return distance_matrix, duration_matrix
             
-            for row in matrix['rows']:
-                distance_row = []
-                duration_row = []
-                for element in row['elements']:
-                    if element['status'] == 'OK':
-                        distance_row.append(element['distance']['value'])  # meters
-                        duration_row.append(element['duration']['value'])  # seconds
-                    else:
-                        distance_row.append(float('inf'))
-                        duration_row.append(float('inf'))
-                distances.append(distance_row)
-                durations.append(duration_row)
-            
-            return np.array(distances), np.array(durations)
         except Exception as e:
-            logger.error(f"Error getting distance matrix: {str(e)}")
+            self.logger.error(f"Error creating distance matrix: {str(e)}")
             raise
-    
-    def _create_distance_callback(self, manager, distances):
-        """Create distance callback for OR-Tools."""
-        def distance_callback(from_index, to_index):
-            from_node = manager.IndexToNode(from_index)
-            to_node = manager.IndexToNode(to_index)
-            return distances[from_node][to_node]
-        return distance_callback
-    
-    def _create_duration_callback(self, manager, durations):
-        """Create duration callback for OR-Tools."""
-        def duration_callback(from_index, to_index):
-            from_node = manager.IndexToNode(from_index)
-            to_node = manager.IndexToNode(to_index)
-            return durations[from_node][to_node]
-        return duration_callback
-    
-    def _create_time_window_callback(self, manager, time_windows):
-        """Create time window callback for OR-Tools."""
-        def time_window_callback(from_index, to_index):
-            from_node = manager.IndexToNode(from_index)
-            to_node = manager.IndexToNode(to_index)
-            return time_windows[from_node][to_node]
-        return time_window_callback
-    
-    def optimize(self, locations, time_windows=None, traffic_data=None):
-        """Optimize delivery routes considering time windows and traffic."""
+
+    def _calculate_euclidean_distance(self, loc1: Dict[str, float], loc2: Dict[str, float]) -> float:
+        """Calculate Euclidean distance between two points."""
         try:
-            # Get distance matrix
-            distances, durations = self._get_distance_matrix(locations)
+            return np.sqrt(
+                (loc1['lat'] - loc2['lat'])**2 + 
+                (loc1['lng'] - loc2['lng'])**2
+            ) * 111000  # Convert to meters (roughly)
+        except Exception as e:
+            self.logger.error(f"Error calculating Euclidean distance: {str(e)}")
+            raise
+
+    def optimize_route(self,
+                      locations: List[Dict[str, float]],
+                      demands: List[float],
+                      vehicle_capacity: float,
+                      num_vehicles: int = 1,
+                      mode: str = 'driving') -> Dict:
+        """
+        Optimize delivery routes using Google OR-Tools.
+        
+        Args:
+            locations: List of locations with lat/lng coordinates
+            demands: List of demands for each location
+            vehicle_capacity: Maximum capacity of each vehicle
+            num_vehicles: Number of vehicles available
+            mode: Travel mode for distance calculation
+        """
+        try:
+            # Create distance matrix
+            distance_matrix, duration_matrix = self.create_distance_matrix(locations, mode)
             
             # Create routing index manager
             manager = pywrapcp.RoutingIndexManager(
-                len(locations),  # number of locations
-                1,  # number of vehicles
-                0   # depot index
+                len(locations), num_vehicles, 0  # 0 is the depot
             )
             
             # Create routing model
             routing = pywrapcp.RoutingModel(manager)
             
             # Register distance callback
-            distance_callback = self._create_distance_callback(manager, distances)
-            routing.RegisterTransitCallback(distance_callback)
+            def distance_callback(from_index, to_index):
+                from_node = manager.IndexToNode(from_index)
+                to_node = manager.IndexToNode(to_index)
+                return distance_matrix[from_node][to_node]
             
-            # Register duration callback
-            duration_callback = self._create_duration_callback(manager, durations)
-            routing.RegisterTransitCallback(duration_callback)
+            transit_callback_index = routing.RegisterTransitCallback(distance_callback)
+            routing.SetArcCostEvaluatorOfAllVehicles(transit_callback_index)
             
-            # Set cost function
-            routing.SetArcCostEvaluatorOfAllVehicles(distance_callback)
+            # Add capacity constraint
+            def demand_callback(from_index):
+                from_node = manager.IndexToNode(from_index)
+                return demands[from_node]
             
-            # Add time window constraints if provided
-            if time_windows:
-                time_window_callback = self._create_time_window_callback(manager, time_windows)
-                routing.AddDimension(
-                    time_window_callback,
-                    0,  # no slack
-                    Config.ROUTING_TIME_WINDOW,  # maximum time per vehicle
-                    False,  # force start cumul to zero
-                    'Time'
-                )
-                time_dimension = routing.GetDimensionOrDie('Time')
-                
-                # Add time window constraints for each location
-                for location_idx, time_window in enumerate(time_windows):
-                    index = manager.NodeToIndex(location_idx)
-                    time_dimension.CumulVar(index).SetRange(
-                        time_window[0],
-                        time_window[1]
-                    )
+            demand_callback_index = routing.RegisterUnaryTransitCallback(demand_callback)
+            routing.AddDimensionWithVehicleCapacity(
+                demand_callback_index,
+                0,  # null capacity slack
+                [vehicle_capacity] * num_vehicles,  # vehicle capacities
+                True,  # force start cumul to zero
+                'Capacity'
+            )
             
-            # Set search parameters
+            # Add time window constraints
+            time_dimension = routing.GetDimensionOrDie('Capacity')
+            time_dimension.SetGlobalSpanCostCoefficient(100)
+            
+            # Set first solution heuristic
             search_parameters = pywrapcp.DefaultRoutingSearchParameters()
             search_parameters.first_solution_strategy = (
                 routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
@@ -137,51 +175,148 @@ class RouteOptimizer:
             if not solution:
                 raise Exception("No solution found")
             
-            # Extract route
-            index = routing.Start(0)
-            route = []
-            route_distances = []
-            route_durations = []
+            # Process solution
+            routes = []
+            total_distance = 0
+            total_duration = 0
             
-            while not routing.IsEnd(index):
-                node_index = manager.IndexToNode(index)
-                route.append(locations[node_index])
+            for vehicle_id in range(num_vehicles):
+                index = routing.Start(vehicle_id)
+                route = []
+                route_distance = 0
+                route_duration = 0
                 
-                previous_index = index
-                index = solution.Value(routing.NextVar(index))
+                while not routing.IsEnd(index):
+                    node_index = manager.IndexToNode(index)
+                    route.append({
+                        'location': locations[node_index],
+                        'demand': demands[node_index]
+                    })
+                    
+                    previous_index = index
+                    index = solution.Value(routing.NextVar(index))
+                    route_distance += routing.GetArcCostForVehicle(
+                        previous_index, index, vehicle_id
+                    )
+                    route_duration += duration_matrix[
+                        manager.IndexToNode(previous_index)
+                    ][manager.IndexToNode(index)]
                 
-                if not routing.IsEnd(index):
-                    next_node_index = manager.IndexToNode(index)
-                    route_distances.append(distances[node_index][next_node_index])
-                    route_durations.append(durations[node_index][next_node_index])
+                routes.append({
+                    'vehicle_id': vehicle_id,
+                    'route': route,
+                    'distance': route_distance,
+                    'duration': route_duration
+                })
+                
+                total_distance += route_distance
+                total_duration += route_duration
             
-            # Calculate route metrics
-            total_distance = sum(route_distances)
-            total_duration = sum(route_durations)
+            # Get route polylines if Google Maps is available
+            route_polylines = []
+            if self.gmaps:
+                for route in routes:
+                    waypoints = [
+                        f"{stop['location']['lat']},{stop['location']['lng']}"
+                        for stop in route['route']
+                    ]
+                    
+                    try:
+                        directions = self.gmaps.directions(
+                            waypoints[0],
+                            waypoints[-1],
+                            waypoints=waypoints[1:-1],
+                            mode=mode,
+                            departure_time=datetime.now()
+                        )
+                        
+                        if directions:
+                            route_polylines.append(directions[0]['overview_polyline']['points'])
+                        else:
+                            route_polylines.append(None)
+                    except Exception as e:
+                        self.logger.warning(f"Error getting route polyline: {str(e)}")
+                        route_polylines.append(None)
             
             return {
-                'route': route,
-                'total_distance': float(total_distance),
-                'total_duration': float(total_duration),
-                'distance_breakdown': [float(d) for d in route_distances],
-                'duration_breakdown': [float(d) for d in route_durations]
+                'routes': routes,
+                'total_distance': total_distance,
+                'total_duration': total_duration,
+                'route_polylines': route_polylines if self.gmaps else None,
+                'metrics': {
+                    'num_vehicles': num_vehicles,
+                    'vehicle_capacity': vehicle_capacity,
+                    'total_demand': sum(demands),
+                    'average_route_distance': total_distance / num_vehicles,
+                    'average_route_duration': total_duration / num_vehicles
+                }
             }
+            
         except Exception as e:
-            logger.error(f"Error optimizing routes: {str(e)}")
+            self.logger.error(f"Error optimizing route: {str(e)}")
             raise
-    
-    def get_metrics(self, start_date, end_date):
-        """Get routing optimization metrics for a given date range."""
+
+    def get_route_metrics(self, route_data: Dict) -> Dict:
+        """Calculate key metrics for the optimized routes."""
         try:
-            # This would typically fetch actual vs optimized values from a database
-            # For now, return placeholder metrics
-            return {
-                'average_route_distance': 15000,  # meters
-                'average_route_duration': 1800,  # seconds
-                'time_window_violations': 0.05,
-                'fuel_efficiency': 0.85,
-                'driver_utilization': 0.92
+            routes = route_data['routes']
+            
+            metrics = {
+                'total_distance': route_data['total_distance'],
+                'total_duration': route_data['total_duration'],
+                'num_routes': len(routes),
+                'route_metrics': []
             }
+            
+            for route in routes:
+                route_metrics = {
+                    'vehicle_id': route['vehicle_id'],
+                    'distance': route['distance'],
+                    'duration': route['duration'],
+                    'num_stops': len(route['route']),
+                    'total_demand': sum(stop['demand'] for stop in route['route']),
+                    'average_stop_distance': route['distance'] / len(route['route']) if route['route'] else 0
+                }
+                metrics['route_metrics'].append(route_metrics)
+            
+            # Calculate aggregate metrics
+            metrics['average_route_distance'] = np.mean([r['distance'] for r in routes])
+            metrics['average_route_duration'] = np.mean([r['duration'] for r in routes])
+            metrics['average_stops_per_route'] = np.mean([r['num_stops'] for r in routes])
+            
+            return metrics
+            
         except Exception as e:
-            logger.error(f"Error getting metrics: {str(e)}")
-            raise 
+            self.logger.error(f"Error calculating route metrics: {str(e)}")
+            raise
+
+# Example usage
+if __name__ == "__main__":
+    # Initialize model
+    google_maps_api_key = os.getenv('GOOGLE_MAPS_API_KEY')
+    model = RoutingModel(google_maps_api_key=google_maps_api_key)
+    
+    # Create sample data
+    locations = [
+        {'lat': 40.7128, 'lng': -74.0060},  # New York
+        {'lat': 40.7589, 'lng': -73.9851},  # Times Square
+        {'lat': 40.7829, 'lng': -73.9654},  # Central Park
+        {'lat': 40.7527, 'lng': -73.9772},  # Empire State
+        {'lat': 40.7484, 'lng': -73.9857}   # Madison Square
+    ]
+    
+    demands = [0, 100, 150, 200, 120]  # First location is depot
+    
+    # Optimize routes
+    route_data = model.optimize_route(
+        locations=locations,
+        demands=demands,
+        vehicle_capacity=500,
+        num_vehicles=2
+    )
+    
+    # Get route metrics
+    metrics = model.get_route_metrics(route_data)
+    
+    print("Route Data:", route_data)
+    print("\nRoute Metrics:", metrics) 

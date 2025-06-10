@@ -31,6 +31,7 @@ import psycopg2
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 import hashlib
 import time
+from models import Transaction, Product, Store, Route
 
 @dataclass
 class VisualizationConfig:
@@ -712,6 +713,290 @@ class DataVisualization:
             'generated_viz': self.viz_status.get('generated', []),
             'errors': self.viz_status.get('errors', [])
         }
+
+    def create_sales_trend_chart(self, date_range='30d', category='all', store='all'):
+        """Create a line chart showing sales trends."""
+        transactions = Transaction.get_sales_analytics(date_range, category, store)
+        
+        if not transactions:
+            return None
+        
+        # Convert to DataFrame
+        df = pd.DataFrame([{
+            'date': t.timestamp.date(),
+            'sales': t.price * t.quantity
+        } for t in transactions])
+        
+        # Group by date and calculate daily sales
+        daily_sales = df.groupby('date')['sales'].sum().reset_index()
+        
+        # Create line chart
+        fig = go.Figure()
+        
+        fig.add_trace(go.Scatter(
+            x=daily_sales['date'],
+            y=daily_sales['sales'],
+            mode='lines',
+            name='Daily Sales',
+            line=dict(color=self.color_palette[0])
+        ))
+        
+        # Add moving averages
+        daily_sales['ma7'] = daily_sales['sales'].rolling(window=7).mean()
+        daily_sales['ma30'] = daily_sales['sales'].rolling(window=30).mean()
+        
+        fig.add_trace(go.Scatter(
+            x=daily_sales['date'],
+            y=daily_sales['ma7'],
+            mode='lines',
+            name='7-day Moving Average',
+            line=dict(color=self.color_palette[1], dash='dash')
+        ))
+        
+        fig.add_trace(go.Scatter(
+            x=daily_sales['date'],
+            y=daily_sales['ma30'],
+            mode='lines',
+            name='30-day Moving Average',
+            line=dict(color=self.color_palette[2], dash='dot')
+        ))
+        
+        # Update layout
+        fig.update_layout(
+            title='Sales Trend Analysis',
+            xaxis_title='Date',
+            yaxis_title='Sales',
+            hovermode='x unified',
+            showlegend=True
+        )
+        
+        return fig.to_json()
+    
+    def create_inventory_chart(self, category='all', store='all'):
+        """Create a bar chart showing inventory levels."""
+        products = Product.get_inventory_analytics(category, store)
+        
+        if not products:
+            return None
+        
+        # Convert to DataFrame
+        df = pd.DataFrame([{
+            'product': p.name,
+            'quantity': p.quantity,
+            'reorder_point': p.reorder_point
+        } for p in products])
+        
+        # Create bar chart
+        fig = go.Figure()
+        
+        fig.add_trace(go.Bar(
+            x=df['product'],
+            y=df['quantity'],
+            name='Current Stock',
+            marker_color=self.color_palette[0]
+        ))
+        
+        fig.add_trace(go.Bar(
+            x=df['product'],
+            y=df['reorder_point'],
+            name='Reorder Point',
+            marker_color=self.color_palette[1]
+        ))
+        
+        # Update layout
+        fig.update_layout(
+            title='Inventory Levels',
+            xaxis_title='Product',
+            yaxis_title='Quantity',
+            barmode='group',
+            showlegend=True
+        )
+        
+        return fig.to_json()
+    
+    def create_delivery_map(self, date_range='30d'):
+        """Create a map showing delivery routes."""
+        routes = Route.query.filter(
+            Route.start_time >= datetime.utcnow() - timedelta(days=int(date_range[:-1]))
+        ).all()
+        
+        if not routes:
+            return None
+        
+        # Create map
+        fig = go.Figure()
+        
+        for route in routes:
+            # Add store location
+            fig.add_trace(go.Scattergeo(
+                lon=[route.store.longitude],
+                lat=[route.store.latitude],
+                mode='markers',
+                name=f'Store {route.store.name}',
+                marker=dict(
+                    size=10,
+                    color=self.color_palette[0]
+                )
+            ))
+            
+            # Add delivery locations
+            for delivery in route.deliveries:
+                fig.add_trace(go.Scattergeo(
+                    lon=[delivery.longitude],
+                    lat=[delivery.latitude],
+                    mode='markers',
+                    name=f'Delivery {delivery.id}',
+                    marker=dict(
+                        size=8,
+                        color=self.color_palette[1]
+                    )
+                ))
+                
+                # Add route line
+                fig.add_trace(go.Scattergeo(
+                    lon=[route.store.longitude, delivery.longitude],
+                    lat=[route.store.latitude, delivery.latitude],
+                    mode='lines',
+                    line=dict(
+                        width=1,
+                        color=self.color_palette[2]
+                    ),
+                    showlegend=False
+                ))
+        
+        # Update layout
+        fig.update_layout(
+            title='Delivery Routes',
+            geo=dict(
+                scope='world',
+                showland=True,
+                landcolor='rgb(243, 243, 243)',
+                countrycolor='rgb(204, 204, 204)'
+            )
+        )
+        
+        return fig.to_json()
+    
+    def create_forecast_chart(self, product_id, period=30, confidence=95):
+        """Create a line chart showing sales forecast."""
+        from data.analyzer import DataAnalyzer
+        analyzer = DataAnalyzer()
+        forecast_data = analyzer.generate_forecast(product_id, period, confidence)
+        
+        if not forecast_data:
+            return None
+        
+        # Convert to DataFrame
+        df = pd.DataFrame(forecast_data['forecasts'])
+        df['date'] = pd.to_datetime(df['date'])
+        
+        # Create line chart
+        fig = go.Figure()
+        
+        # Add forecast line
+        fig.add_trace(go.Scatter(
+            x=df['date'],
+            y=df['forecast'],
+            mode='lines',
+            name='Forecast',
+            line=dict(color=self.color_palette[0])
+        ))
+        
+        # Add confidence interval
+        fig.add_trace(go.Scatter(
+            x=df['date'],
+            y=df['confidence_upper'],
+            mode='lines',
+            name='Upper Bound',
+            line=dict(width=0),
+            showlegend=False
+        ))
+        
+        fig.add_trace(go.Scatter(
+            x=df['date'],
+            y=df['confidence_lower'],
+            mode='lines',
+            name='Lower Bound',
+            line=dict(width=0),
+            fill='tonexty',
+            fillcolor='rgba(0,100,80,0.2)',
+            showlegend=False
+        ))
+        
+        # Update layout
+        fig.update_layout(
+            title='Sales Forecast',
+            xaxis_title='Date',
+            yaxis_title='Forecasted Sales',
+            hovermode='x unified',
+            showlegend=True
+        )
+        
+        return fig.to_json()
+    
+    def create_seasonal_pattern_chart(self, date_range='365d'):
+        """Create a heatmap showing seasonal patterns."""
+        from data.analyzer import DataAnalyzer
+        analyzer = DataAnalyzer()
+        seasonal_data = analyzer.analyze_seasonal_patterns(date_range)
+        
+        if not seasonal_data:
+            return None
+        
+        # Convert to DataFrame
+        df = pd.DataFrame({
+            'month': list(seasonal_data['monthly_patterns'].keys()),
+            'sales': list(seasonal_data['monthly_patterns'].values())
+        })
+        
+        # Create heatmap
+        fig = go.Figure(data=go.Heatmap(
+            z=df['sales'].values.reshape(1, -1),
+            x=df['month'],
+            y=['Sales'],
+            colorscale='Viridis'
+        ))
+        
+        # Update layout
+        fig.update_layout(
+            title='Seasonal Sales Patterns',
+            xaxis_title='Month',
+            yaxis_title='',
+            showlegend=False
+        )
+        
+        return fig.to_json()
+    
+    def create_correlation_heatmap(self, date_range='30d'):
+        """Create a heatmap showing product correlations."""
+        from data.analyzer import DataAnalyzer
+        analyzer = DataAnalyzer()
+        correlation_data = analyzer.analyze_product_correlations(date_range)
+        
+        if not correlation_data:
+            return None
+        
+        # Convert to DataFrame
+        df = pd.DataFrame(correlation_data)
+        
+        # Create heatmap
+        fig = go.Figure(data=go.Heatmap(
+            z=df.values,
+            x=df.columns,
+            y=df.index,
+            colorscale='RdBu',
+            zmid=0
+        ))
+        
+        # Update layout
+        fig.update_layout(
+            title='Product Sales Correlations',
+            xaxis_title='Product',
+            yaxis_title='Product',
+            showlegend=False
+        )
+        
+        return fig.to_json()
 
 # Example usage
 if __name__ == "__main__":

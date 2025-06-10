@@ -18,6 +18,8 @@ import hashlib
 import hmac
 import base64
 import time
+from io import StringIO
+from models import Transaction, Product, Store, Weather, Route, Forecast, Log
 
 @dataclass
 class ExportConfig:
@@ -46,6 +48,8 @@ class DataExporter:
         
         # Set up logging
         self.logger = logging.getLogger(__name__)
+        
+        self.supported_formats = ['csv', 'json', 'excel']
 
     def load_data(self) -> None:
         """Load processed data from CSV files."""
@@ -333,6 +337,258 @@ class DataExporter:
         except Exception as e:
             self.logger.error(f"Error exporting all data: {str(e)}")
             raise
+
+    def export_data(self, data, format='csv'):
+        """Export data in the specified format."""
+        if format not in self.supported_formats:
+            raise ValueError(f'Unsupported export format: {format}')
+        
+        if format == 'csv':
+            return self._export_csv(data)
+        elif format == 'json':
+            return self._export_json(data)
+        elif format == 'excel':
+            return self._export_excel(data)
+    
+    def _export_csv(self, data):
+        """Export data to CSV format."""
+        output = StringIO()
+        writer = csv.writer(output)
+        
+        # Write header
+        writer.writerow(['table', 'data'])
+        
+        # Write data
+        for table, records in data.items():
+            for record in records:
+                writer.writerow([table, json.dumps(record, default=str)])
+        
+        return output.getvalue()
+    
+    def _export_json(self, data):
+        """Export data to JSON format."""
+        return json.dumps(data, default=str)
+    
+    def _export_excel(self, data):
+        """Export data to Excel format."""
+        # Create Excel writer
+        output = StringIO()
+        writer = pd.ExcelWriter(output, engine='xlsxwriter')
+        
+        # Write each table to a separate sheet
+        for table, records in data.items():
+            df = pd.DataFrame(records)
+            df.to_excel(writer, sheet_name=table, index=False)
+        
+        # Save and get the Excel file
+        writer.save()
+        return output.getvalue()
+    
+    def export_sales_report(self, date_range='30d', category='all', store='all', format='csv'):
+        """Export sales report."""
+        # Get sales data
+        sales_data = Transaction.get_sales_analytics(date_range, category, store)
+        
+        if not sales_data:
+            return None
+        
+        # Convert to DataFrame
+        df = pd.DataFrame([{
+            'date': t.timestamp.date(),
+            'product': t.product.name,
+            'store': t.store.name,
+            'quantity': t.quantity,
+            'price': t.price,
+            'total': t.price * t.quantity
+        } for t in sales_data])
+        
+        # Group by date and calculate daily totals
+        daily_totals = df.groupby('date').agg({
+            'quantity': 'sum',
+            'total': 'sum'
+        }).reset_index()
+        
+        # Group by product and calculate product totals
+        product_totals = df.groupby('product').agg({
+            'quantity': 'sum',
+            'total': 'sum'
+        }).reset_index()
+        
+        # Group by store and calculate store totals
+        store_totals = df.groupby('store').agg({
+            'quantity': 'sum',
+            'total': 'sum'
+        }).reset_index()
+        
+        # Prepare data for export
+        data = {
+            'daily_sales': daily_totals.to_dict('records'),
+            'product_sales': product_totals.to_dict('records'),
+            'store_sales': store_totals.to_dict('records')
+        }
+        
+        return self.export_data(data, format)
+    
+    def export_inventory_report(self, category='all', store='all', format='csv'):
+        """Export inventory report."""
+        # Get inventory data
+        inventory_data = Product.get_inventory_analytics(category, store)
+        
+        if not inventory_data:
+            return None
+        
+        # Convert to DataFrame
+        df = pd.DataFrame([{
+            'sku': p.sku,
+            'name': p.name,
+            'category': p.category,
+            'price': p.price,
+            'quantity': p.quantity,
+            'reorder_point': p.reorder_point,
+            'value': p.value
+        } for p in inventory_data])
+        
+        # Group by category and calculate category totals
+        category_totals = df.groupby('category').agg({
+            'quantity': 'sum',
+            'value': 'sum'
+        }).reset_index()
+        
+        # Prepare data for export
+        data = {
+            'inventory': df.to_dict('records'),
+            'category_totals': category_totals.to_dict('records')
+        }
+        
+        return self.export_data(data, format)
+    
+    def export_delivery_report(self, date_range='30d', format='csv'):
+        """Export delivery report."""
+        # Get delivery data
+        delivery_data = Route.get_delivery_analytics(date_range)
+        
+        if not delivery_data:
+            return None
+        
+        # Convert to DataFrame
+        df = pd.DataFrame([{
+            'status': r.status,
+            'count': r.count
+        } for r in delivery_data])
+        
+        # Calculate success rate
+        total_deliveries = df['count'].sum()
+        successful_deliveries = df[df['status'] == 'completed']['count'].sum()
+        success_rate = (successful_deliveries / total_deliveries * 100) if total_deliveries > 0 else 0
+        
+        # Prepare data for export
+        data = {
+            'delivery_status': df.to_dict('records'),
+            'metrics': {
+                'total_deliveries': total_deliveries,
+                'successful_deliveries': successful_deliveries,
+                'success_rate': success_rate
+            }
+        }
+        
+        return self.export_data(data, format)
+    
+    def export_forecast_report(self, product_id, period=30, confidence=95, format='csv'):
+        """Export forecast report."""
+        from data.analyzer import DataAnalyzer
+        analyzer = DataAnalyzer()
+        forecast_data = analyzer.generate_forecast(product_id, period, confidence)
+        
+        if not forecast_data:
+            return None
+        
+        # Convert to DataFrame
+        df = pd.DataFrame(forecast_data['forecasts'])
+        
+        # Calculate summary statistics
+        summary = {
+            'mean_forecast': df['forecast'].mean(),
+            'min_forecast': df['forecast'].min(),
+            'max_forecast': df['forecast'].max(),
+            'confidence_interval': {
+                'upper': df['confidence_upper'].mean(),
+                'lower': df['confidence_lower'].mean()
+            }
+        }
+        
+        # Prepare data for export
+        data = {
+            'forecasts': df.to_dict('records'),
+            'summary': summary
+        }
+        
+        return self.export_data(data, format)
+    
+    def export_weather_report(self, date_range='30d', format='csv'):
+        """Export weather report."""
+        # Get weather data
+        weather_data = Weather.query.filter(
+            Weather.timestamp >= datetime.utcnow() - timedelta(days=int(date_range[:-1]))
+        ).all()
+        
+        if not weather_data:
+            return None
+        
+        # Convert to DataFrame
+        df = pd.DataFrame([{
+            'date': w.timestamp.date(),
+            'store': w.store.name,
+            'temperature': w.temperature,
+            'condition': w.condition
+        } for w in weather_data])
+        
+        # Calculate weather statistics
+        stats = {
+            'avg_temperature': df['temperature'].mean(),
+            'min_temperature': df['temperature'].min(),
+            'max_temperature': df['temperature'].max(),
+            'condition_counts': df['condition'].value_counts().to_dict()
+        }
+        
+        # Prepare data for export
+        data = {
+            'weather_data': df.to_dict('records'),
+            'statistics': stats
+        }
+        
+        return self.export_data(data, format)
+    
+    def export_log_report(self, level='all', format='csv'):
+        """Export log report."""
+        # Get log data
+        query = Log.query
+        if level != 'all':
+            query = query.filter(Log.level == level)
+        log_data = query.all()
+        
+        if not log_data:
+            return None
+        
+        # Convert to DataFrame
+        df = pd.DataFrame([{
+            'timestamp': l.timestamp,
+            'level': l.level,
+            'message': l.message
+        } for l in log_data])
+        
+        # Calculate log statistics
+        stats = {
+            'total_logs': len(log_data),
+            'level_counts': df['level'].value_counts().to_dict()
+        }
+        
+        # Prepare data for export
+        data = {
+            'logs': df.to_dict('records'),
+            'statistics': stats
+        }
+        
+        return self.export_data(data, format)
 
 # Example usage
 if __name__ == "__main__":
